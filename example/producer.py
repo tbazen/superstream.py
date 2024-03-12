@@ -48,9 +48,8 @@ async def main():
 
         sys.stderr.write("%% Waiting for %d deliveries\n" % len(producer))
         producer.flush()
-
-    except Exception as e:
-        print(e)
+    except Exception:
+        sys.stderr.write("%% Producer stopped\n")
 
 
 if __name__ == "__main__":

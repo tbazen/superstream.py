@@ -14,7 +14,7 @@ from superstream.constants import (
     _SUPERSTREAM_INTERNAL_USERNAME,
 )
 from superstream.exceptions import ErrGenerateConnectionId
-from superstream.interceptors import _Consumer, _Producer
+from superstream.interceptors import _ConsumerInterceptor, _ProducerInterceptor
 from superstream.serialization import SuperstreamDeserializer
 from superstream.types import ClientConfig, ClientReconnectionUpdateReq, Option
 from superstream.utils import _name
@@ -174,7 +174,7 @@ async def _init_producer(
     if producer is None:
         raise Exception("superstream: producer should be provided")
     client_id = await init_async(token, host, config, opts)
-    return _Producer(client_id, config)
+    return _ProducerInterceptor(client_id, config)
 
 
 async def _init_consumer(
@@ -183,7 +183,7 @@ async def _init_consumer(
     if consumer is None:
         raise Exception("superstream: consumer should be provided")
     client_id = await init_async(token, host, config, opts)
-    return _Consumer(client_id, config)
+    return _ConsumerInterceptor(client_id, config)
 
 
 def init(
@@ -193,7 +193,7 @@ def init(
     opts: Option,
     producer: Optional[Producer] = None,
     consumer: Optional[Consumer] = None,
-) -> ClientConfig:
+) -> Union[Producer, Consumer]:
     if producer is None and consumer is None:
         raise Exception("superstream: either producer or consumer should be provided")
 

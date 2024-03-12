@@ -15,14 +15,14 @@ from superstream.types import Option
 
 ## Producer
 
-To use `Superstream` with kafka producer, first define the producer configurations:
+To use `superstream` with kafka producer, first define the kafka and superstream configurations:
   
 ```python
 token = "<superstream-token>"
 superstream_host = "<superstream-host>"
 broker = "<kafka-broker>"
 topic = "<kafka-topic>"
-conf = {"bootstrap.servers": broker}
+config = {"bootstrap.servers": broker}
 options = Option(host=superstream_host, learning_factor=10, servers=broker)
 ```
 
@@ -55,30 +55,16 @@ superstream_host = "<superstream-host>"
 group = "<kafka-consumer-group>"
 topics = ["<kafka-topic>"]
 broker = "<kafka-broker>"
-conf = {
+config = {
     "bootstrap.servers": broker,
     "group.id": group
 }
 options = Option(host=superstream_host, learning_factor=10, servers=broker)
 ```
 
-Similar to producer, to initialize superstream, use `init`:
+Too initialize superstream, use `init` function and pass the consumer instance as an argument:
 
 ```python
-result = init(token, superstream_host, conf, options)
-```
-
-Next, create a deserializer using `create_deserializer`:
-
-```python
-deserialize = create_deserializer(result, deserialize)
-```
-
-Finally, use the deserialize callable instance to deserialize consumed messages as shown below:
-
-```python
-consumer = Consumer(conf)
-msg = consumer.poll(timeout=1.0)
-if msg is not None:
-    content = deserialize(msg.value(), SerializationContext(msg.topic(), MessageField.VALUE, msg.headers()))
+consumer = Consumer(config)
+consumer = superstream.init(token, superstream_host, config, options, consumer=consumer)
 ```

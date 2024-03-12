@@ -9,7 +9,7 @@
 ## Importing
 
 ```python
-from superstream import create_deserializer, create_producer, init
+import superstream
 from superstream.types import Option
 ```
 
@@ -26,16 +26,11 @@ conf = {"bootstrap.servers": broker}
 options = Option(host=superstream_host, learning_factor=10, servers=broker)
 ```
 
-To initialize superstream, use `init`:
+To initialize superstream, use `init` function and pass the producer instance as an argument:
 
 ```python
-result = init(token, superstream_host, conf, options)
-```
-
-Then create a new instance of kafka producer use `create_producer`:
-
-```python
-producer = create_producer(conf, result)
+producer = Producer(config)
+producer = superstream.init(token, superstream_host, config, options, producer=producer)
 ```
 
 Finally, to produce messages to kafka, use `produce` function:

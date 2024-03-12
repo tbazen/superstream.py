@@ -1,8 +1,8 @@
 import asyncio
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 
 import nats
-from confluent_kafka import Producer
+from confluent_kafka import Consumer, Producer
 from confluent_kafka.serialization import Serializer
 from nats.aio.errors import ErrAuthorization
 
@@ -14,7 +14,7 @@ from superstream.constants import (
     _SUPERSTREAM_INTERNAL_USERNAME,
 )
 from superstream.exceptions import ErrGenerateConnectionId
-from superstream.interceptors import SuperstreamProducer
+from superstream.interceptors import _Consumer, _Producer
 from superstream.serialization import SuperstreamDeserializer
 from superstream.types import ClientConfig, ClientReconnectionUpdateReq, Option
 from superstream.utils import _name
@@ -62,7 +62,7 @@ async def _initialize_nats_connection(token: str, host: Union[str, List[str]]):
         raise Exception(f"error connecting with superstream: {e!s}") from e
 
 
-async def init(token: str, host: str, config: Dict, opts: Option) -> ClientConfig:
+async def init_async(token: str, host: str, config: Dict, opts: Option) -> ClientConfig:
     new_config = config
 
     client_type = "kafka"
@@ -168,9 +168,35 @@ def create_deserializer(client_id: int) -> Serializer:
     return deserializer
 
 
-def create_producer(conf: Dict, client_id: int) -> Producer:
-    try:
-        return SuperstreamProducer(client_id, conf=conf)
-    except Exception as e:
-        print("superstream: ", e)
-        return None
+async def _init_producer(
+    token: str, host: str, config: Dict, opts: Option, producer: Optional[Producer] = None
+) -> Producer:
+    if producer is None:
+        raise Exception("superstream: producer should be provided")
+    client_id = await init_async(token, host, config, opts)
+    return _Producer(client_id, config)
+
+
+async def _init_consumer(
+    token: str, host: str, config: Dict, opts: Option, consumer: Optional[Consumer] = None
+) -> Consumer:
+    if consumer is None:
+        raise Exception("superstream: consumer should be provided")
+    client_id = await init_async(token, host, config, opts)
+    return _Consumer(client_id, config)
+
+
+def init(
+    token: str,
+    host: str,
+    config: Dict,
+    opts: Option,
+    producer: Optional[Producer] = None,
+    consumer: Optional[Consumer] = None,
+) -> ClientConfig:
+    if producer is None and consumer is None:
+        raise Exception("superstream: either producer or consumer should be provided")
+
+    if producer is not None:
+        return asyncio.run(_init_producer(token, host, config, opts, producer))
+    return asyncio.run(_init_consumer(token, host, config, opts, consumer))

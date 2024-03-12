@@ -2,7 +2,7 @@ import asyncio
 import time
 from typing import Dict, Optional
 
-from confluent_kafka import Producer
+from confluent_kafka import Consumer, Producer
 from confluent_kafka.serialization import Serializer
 
 import superstream.manager as manager
@@ -156,12 +156,21 @@ def configure_serializer(client_id: int, serializer: Serializer):
         print("superstream: ", str(e))
 
 
-class SuperstreamProducer(Producer):
-    def __init__(self, client_id, conf: Dict):
-        if (conf is None) or (isinstance(conf, Dict) is False):
+class _Consumer(Consumer):
+    def __init__(self, client_id, config: Dict):
+        if (config is None) or (isinstance(config, Dict) is False):
             raise Exception("superstream: invalid configuration object")
-        super().__init__(conf)
-        self.__config = conf
+        super().__init__(config)
+        self.__config = config
+        self.client_id = client_id
+
+
+class _Producer(Producer):
+    def __init__(self, client_id, config: Dict):
+        if (config is None) or (isinstance(config, Dict) is False):
+            raise Exception("superstream: invalid configuration object")
+        super().__init__(config)
+        self.__config = config
         self.client_id = client_id
 
     def produce(self, *args, **kwargs):

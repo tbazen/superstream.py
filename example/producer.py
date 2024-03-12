@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from superstream import create_producer, init
+from confluent_kafka import Producer
+
+import superstream
 from superstream.types import Option
 
 
@@ -13,11 +15,11 @@ async def main():
         superstream_host = "<superstream-host>"
         broker = "<kafka-broker>"
         topic = "<kafka-topic>"
-        conf = {"bootstrap.servers": broker}
-
+        config = {"bootstrap.servers": broker}
         options = Option(host=superstream_host, learning_factor=10, servers=broker)
-        result = await init(token, superstream_host, conf, options)
-        producer = create_producer(conf, result)
+
+        producer = Producer(config)
+        producer = superstream.init(token, superstream_host, config, options, producer=producer)
 
         def delivery_callback(err, msg):
             if err:

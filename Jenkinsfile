@@ -33,7 +33,7 @@ pipeline {
                 script {
                     if (env.BRANCH_NAME == 'test-pipeline') {
                         sh """
-                        sed -i -r "s/superstream/superstream-beta/g" yproject.toml
+                        sed -i -r "s/superstream/superstream-beta/g" pyproject.toml
                     """
                     }
                 sh """ 

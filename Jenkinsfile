@@ -5,45 +5,68 @@ pipeline {
     }
 
     stages {
-        stage('Install GoLang') {
+        stage('Install twine') {
             steps {
                 script {
                     def branchName = env.BRANCH_NAME ?: ''
                     // Check if the branch is 'latest'
-                    if (branchName == 'latest') {
+                    if (branchName == 'master') {
                         // Read version from version-beta.conf
-                        def version = readFile('version.conf').trim()
+                        def version = readFile('version-beta.conf').trim()
                         // Set the VERSION environment variable to the version from the file
                         env.versionTag = version
-                        echo "Using version from version-beta.conf: ${env.VERSION}"
+                        echo "Using version from version-beta.conf: ${env.versionTag}"
                     } else {
-                        def version = readFile('version-beta.conf').trim()
+                        def version = readFile('version.conf').trim()
                         env.versionTag = version
-                        echo "Using version from version-beta.conf: ${env.versionTag}"                        
+                        echo "Using version from version.conf: ${env.versionTag}"                        
                     }
                 }            
-                sh 'wget -q https://go.dev/dl/go1.20.12.linux-amd64.tar.gz'
-                sh 'sudo  tar -C /usr/local -xzf go1.20.12.linux-amd64.tar.gz'
+                sh """
+                    pip3 install twine
+                    python3 -m pip install urllib3==1.26.6
+                """
             }
         }
-        stage("Deploy Kafka.GO SDK") {
+        stage("Deploy to pypi") {
             steps {
-                sh "git tag v$versionTag"
-                withCredentials([sshUserPrivateKey(keyFileVariable:'check',credentialsId: 'main-github')]) {
-                    sh "GIT_SSH_COMMAND='ssh -i $check' git push origin v$versionTag"
+                script {
+                    if (env.BRANCH_NAME == 'master') {
+                        sh """
+                        sed -i -r "s/superstream/superstream-beta/g" pyproject.toml
+                    """
+                    }
+                sh "sed -i -r 's/version = \"[0-9]+\\.[0-9]+\\.[0-9]+\"/version = \"$versionTag\"/g' pyproject.toml"
+                sh "cat pyproject.toml" 
+                // Install build dependencies
+                sh 'pip install build'
+                // Build your SDK
+                sh 'python -m build'                                      
                 }
-                sh "GOPROXY=proxy.golang.org /usr/local/go/bin/go list -m github.com/memphisdev/superstream.go@v$versionTag"
-                }
+                withCredentials([usernamePassword(credentialsId: 'python_sdk', usernameVariable: 'USR', passwordVariable: 'PSW')]) {
+                    sh '~/.local/bin/twine upload -u $USR -p $PSW dist/*'
+                }                
+            }
         }
       stage('Checkout to version branch'){
             when {
                 expression { env.BRANCH_NAME == 'latest' }
             }        
             steps {
+                sh """
+                   sudo dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo -y
+                   sudo dnf install gh -y
+                """
                 withCredentials([sshUserPrivateKey(keyFileVariable:'check',credentialsId: 'main-github')]) {
-                sh "git reset --hard origin/latest"
-                sh "GIT_SSH_COMMAND='ssh -i $check'  git checkout -b $versionTag"
-                sh "GIT_SSH_COMMAND='ssh -i $check' git push --set-upstream origin $versionTag"
+                sh """
+                   GIT_SSH_COMMAND='ssh -i $check' git checkout -b $versionTag
+                   GIT_SSH_COMMAND='ssh -i $check' git push --set-upstream origin $versionTag
+                """
+                }
+                withCredentials([string(credentialsId: 'gh_token', variable: 'GH_TOKEN')]) {
+                sh """
+                   gh release create $versionTag --generate-notes
+                """
                 }
             }
       }        

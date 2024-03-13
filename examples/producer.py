@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 import json
+import sys
 
 from confluent_kafka import Producer
 
@@ -23,7 +23,7 @@ async def main():
             "sasl.username": "",
             "sasl.password": "",
         }
-        options = Option(host=superstream_host, learning_factor=10, servers=brokers)
+        options = Option(learning_factor=10, servers=brokers)
 
         producer = Producer(config)
         producer = superstream.init(token, superstream_host, config, options, producer=producer)

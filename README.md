@@ -23,7 +23,7 @@ superstream_host = "<superstream-host>"
 broker = "<kafka-broker>"
 topic = "<kafka-topic>"
 config = {"bootstrap.servers": broker}
-options = Option(host=superstream_host, learning_factor=10, servers=broker)
+options = Option(learning_factor=10, servers=broker)
 ```
 
 To initialize superstream, use `init` function and pass the producer instance as an argument:
@@ -59,10 +59,10 @@ config = {
     "bootstrap.servers": broker,
     "group.id": group
 }
-options = Option(host=superstream_host, learning_factor=10, servers=broker)
+options = Option(learning_factor=10, servers=broker)
 ```
 
-Too initialize superstream, use `init` function and pass the consumer instance as an argument:
+To initialize superstream, use `init` function and pass the consumer instance as an argument:
 
 ```python
 consumer = Consumer(config)

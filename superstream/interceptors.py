@@ -108,31 +108,49 @@ class _ProducerInterceptor(Producer):
         self.client_id = client_id
 
     def produce(self, *args, **kwargs):
+        topic_index = 0
+        value_index = 1
+        partition_index = 3
+        headers_index = 6
         try:
             client = manager._clients.get(self.client_id)
             if client is None:
                 super().produce(*args, **kwargs)
                 return
 
-            msg = args[1]
+            msg = args[value_index] if len(args) > value_index else kwargs.get("value")
             json_msg = _try_convert_to_json(msg)
             if json_msg is None:
                 super().produce(*args, **kwargs)
                 return
-            topic = args[0]
-            partition = kwargs.get("partition", 0)
+            topic = args[topic_index]
+            partition = args or 0 if len(args) > partition_index else kwargs.get("partition", 0)
             encoded_msg, superstream_headers = asyncio.run(self._intercept(topic, json_msg, client, partition))
-            if superstream_headers is not None:
-                if kwargs.get("headers") is None:
-                    kwargs["headers"] = superstream_headers
-                elif isinstance(kwargs["headers"], dict):
-                    kwargs["headers"].update(superstream_headers)
-                elif isinstance(kwargs["headers"], list):
-                    kwargs["headers"].extend(list(superstream_headers.items()))
-            super().produce(topic, encoded_msg, *args[2:], **kwargs)
 
+            if superstream_headers is not None:
+                if len(args) > headers_index:
+                    if args[headers_index] is None:
+                        args[headers_index] = superstream_headers
+                    elif isinstance(args[headers_index], dict):
+                        args[headers_index].update(superstream_headers)
+                    elif isinstance(args[headers_index], list):
+                        args[headers_index].extend(list(superstream_headers.items()))
+                else:
+                    if kwargs.get("headers") is None:
+                        kwargs["headers"] = superstream_headers
+                    elif isinstance(kwargs["headers"], dict):
+                        kwargs["headers"].update(superstream_headers)
+                    elif isinstance(kwargs["headers"], list):
+                        kwargs["headers"].extend(list(superstream_headers.items()))
+
+            if len(args) > value_index:
+                args = args[:value_index] + (encoded_msg,) + args[value_index + 1 :]
+            elif "value" in kwargs:
+                kwargs["value"] = encoded_msg
         except Exception as e:
             print("superstream: ", e)
+
+        super().produce(*args, **kwargs)
 
     async def _intercept(self, topic: str, msg: str, client: _Client, partition: int = 0) -> (bytes, Optional[Dict]):
         if client.config.producer_topics_partitions is None:

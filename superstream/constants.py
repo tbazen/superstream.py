@@ -10,7 +10,7 @@ _SUPERSTREAM_CLIENTS_UPDATE_SUBJECT = "internal_tasks.clientsUpdate.%s.%s"
 _SUPERSTREAM_INTERNAL_USERNAME = "superstream_internal"
 _SUPERSTREAM_ERROR_SUBJECT: str = "internal.clientErrors"
 
-_SDK_VERSION = "0.0.1"
+_SDK_VERSION = "1.0.0"
 _SDK_LANGUAGE = "python"
 
 _CONSUMER_CLIENT_TYPE = "consumer"

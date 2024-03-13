@@ -113,12 +113,13 @@ class _ProducerInterceptor(Producer):
             if client is None:
                 super().produce(*args, **kwargs)
                 return
-            topic = args[0]
+
             msg = args[1]
-            success, json_msg = _try_convert_to_json(msg)
-            if not success or json_msg is None:
+            json_msg = _try_convert_to_json(msg)
+            if json_msg is None:
                 super().produce(*args, **kwargs)
                 return
+            topic = args[0]
             partition = kwargs.get("partition", 0)
             encoded_msg, superstream_headers = asyncio.run(self._intercept(topic, json_msg, client, partition))
             if superstream_headers is not None:
@@ -156,8 +157,7 @@ class _ProducerInterceptor(Producer):
         if client.producer_proto_desc is not None:
             try:
                 proto_msg = json_to_proto(byte_msg, client.producer_proto_desc)
-            except Exception as e:
-                print(e)
+            except Exception as e:  # noqa: F841
                 client.counters.total_bytes_after_reduction += len(byte_msg)
                 client.counters.total_messages_failed_produce += 1
                 return byte_msg, None

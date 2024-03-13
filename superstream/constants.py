@@ -8,7 +8,6 @@ _SUPERSTREAM_GET_SCHEMA_SUBJECT = "internal.schema.getSchema.%s"
 _SUPERSTREAM_ERROR_SUBJECT = "internal.clientErrors"
 _SUPERSTREAM_CLIENTS_UPDATE_SUBJECT = "internal_tasks.clientsUpdate.%s.%s"
 _SUPERSTREAM_INTERNAL_USERNAME = "superstream_internal"
-_SUPERSTREAM_ERROR_SUBJECT: str = "internal.clientErrors"
 
 _SDK_VERSION = "1.0.0"
 _SDK_LANGUAGE = "python"

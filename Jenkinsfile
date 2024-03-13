@@ -5,60 +5,72 @@ pipeline {
     }
 
     stages {
-        stage('Install GoLang') {
+        stage('Install twine') {
             steps {
                 script {
                     def branchName = env.BRANCH_NAME ?: ''
                     // Check if the branch is 'latest'
-                    if (branchName == 'latest') {
+                    if (branchName == 'test-pipeline') {
                         // Read version from version-beta.conf
-                        def version = readFile('version.conf').trim()
+                        def version = readFile('version-beta.conf').trim()
                         // Set the VERSION environment variable to the version from the file
                         env.versionTag = version
                         echo "Using version from version-beta.conf: ${env.VERSION}"
                     } else {
-                        def version = readFile('version-beta.conf').trim()
+                        def version = readFile('version.conf').trim()
                         env.versionTag = version
-                        echo "Using version from version-beta.conf: ${env.versionTag}"                        
+                        echo "Using version from version.conf: ${env.versionTag}"                        
                     }
                 }            
-                sh 'wget -q https://go.dev/dl/go1.20.12.linux-amd64.tar.gz'
-                sh 'sudo  tar -C /usr/local -xzf go1.20.12.linux-amd64.tar.gz'
+                sh """
+                    pip3 install twine
+                    python3 -m pip install urllib3==1.26.6
+                """
             }
         }
-        stage("Deploy Kafka.GO SDK") {
+        stage("Deploy to pypi") {
             steps {
-                sh "git tag v$versionTag"
-                withCredentials([sshUserPrivateKey(keyFileVariable:'check',credentialsId: 'main-github')]) {
-                    sh "GIT_SSH_COMMAND='ssh -i $check' git push origin v$versionTag"
-                }
-                sh "GOPROXY=proxy.golang.org /usr/local/go/bin/go list -m github.com/memphisdev/superstream.go@v$versionTag"
-                }
-        }
-      stage('Checkout to version branch'){
-            when {
-                expression { env.BRANCH_NAME == 'latest' }
-            }        
-            steps {
-                withCredentials([sshUserPrivateKey(keyFileVariable:'check',credentialsId: 'main-github')]) {
-                sh "git reset --hard origin/latest"
-                sh "GIT_SSH_COMMAND='ssh -i $check'  git checkout -b $versionTag"
-                sh "GIT_SSH_COMMAND='ssh -i $check' git push --set-upstream origin $versionTag"
+                script {
+                    if (env.BRANCH_NAME == 'test-pipeline') {
+                        sh """
+                        sed -i -r "s/superstream/superstream-beta/g" setup.py
+                    """
+                    }
+                sh """ 
+                sed -i -r "s/version=\\"[0-9].[0-9].[0-9]/version=\\"$versionTag/g" pyproject.toml
+                """
+                sh "cat pyproject.toml" 
+                // Install build dependencies
+                sh 'pip install build'
+                // Build your SDK
+                sh 'python -m build'                                      
                 }
             }
-      }        
+        }
+    //   stage('Checkout to version branch'){
+    //         when {
+    //             expression { env.BRANCH_NAME == 'latest' }
+    //         }        
+    //         steps {
+    //             withCredentials([sshUserPrivateKey(keyFileVariable:'check',credentialsId: 'main-github')]) {
+    //             sh "git reset --hard origin/latest"
+    //             sh "GIT_SSH_COMMAND='ssh -i $check'  git checkout -b $versionTag"
+    //             sh "GIT_SSH_COMMAND='ssh -i $check' git push --set-upstream origin $versionTag"
+    //             }
+    //         }
+    //   }        
     }
 
     post {
         always {
             cleanWs()
         }
-        success {
-            notifySuccessful()
-        }
-        failure {
-            notifyFailed()
-        }
+        // success {
+        //     notifySuccessful()
+        // }
+        // failure {
+        //     notifyFailed()
+        // }
     }
 }
 

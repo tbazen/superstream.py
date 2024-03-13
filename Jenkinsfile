@@ -43,6 +43,9 @@ pipeline {
                 // Build your SDK
                 sh 'python -m build'                                      
                 }
+                withCredentials([usernamePassword(credentialsId: 'python_sdk', usernameVariable: 'USR', passwordVariable: 'PSW')]) {
+                    sh '~/.local/bin/twine upload -u $USR -p $PSW dist/*'
+                }                
             }
         }
     //   stage('Checkout to version branch'){

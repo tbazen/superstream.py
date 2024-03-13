@@ -36,9 +36,7 @@ pipeline {
                         sed -i -r "s/superstream/superstream-beta/g" pyproject.toml
                     """
                     }
-                sh """ 
-                sed -i -r "s/version=\\"[0-9].[0-9].[0-9]/version=\\"$versionTag/g" pyproject.toml
-                """
+                sh "sed -i -r 's/version = \"[0-9]+\\.[0-9]+\\.[0-9]+\"/version = \"$versionTag\"/g' pyproject.toml"
                 sh "cat pyproject.toml" 
                 // Install build dependencies
                 sh 'pip install build'

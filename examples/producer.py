@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import json
 
 from confluent_kafka import Producer
 
@@ -13,10 +14,16 @@ async def main():
     try:
         token = "<superstream-token>"
         superstream_host = "<superstream-host>"
-        broker = "<kafka-broker>"
+        brokers = "<kafka-broker>"
         topic = "<kafka-topic>"
-        config = {"bootstrap.servers": broker}
-        options = Option(host=superstream_host, learning_factor=10, servers=broker)
+        config = {
+            "bootstrap.servers": brokers,
+            "security.protocol": "SASL_SSL",
+            "sasl.mechanism": "PLAIN",
+            "sasl.username": "",
+            "sasl.password": "",
+        }
+        options = Option(host=superstream_host, learning_factor=10, servers=brokers)
 
         producer = Producer(config)
         producer = superstream.init(token, superstream_host, config, options, producer=producer)
@@ -29,10 +36,11 @@ async def main():
 
         for index in range(10_000):
             person = {"name": "John", "message": f"Hello, World! {index}"}
+            message = json.dumps(person)
             try:
                 producer.produce(
                     topic,
-                    person,
+                    message,
                     on_delivery=delivery_callback,
                     headers={"key": "value"},
                 )

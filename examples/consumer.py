@@ -12,15 +12,19 @@ async def main():
     superstream_host = "<superstream-host>"
     group = "<kafka-consumer-group>"
     topics = ["<kafka-topic>"]
-    broker = "<kafka-broker>"
+    brokers = "<kafka-broker>"
     config = {
-        "bootstrap.servers": broker,
+        "bootstrap.servers": brokers,
+        'security.protocol': 'SASL_SSL',
+        "sasl.mechanism": "PLAIN",
+        "sasl.username": "",
+        "sasl.password": "",
         "group.id": group,
         "session.timeout.ms": 6000,
         "enable.auto.offset.store": False,
         "statistics.interval.ms": 1000,
     }
-    options = Option(host=superstream_host, learning_factor=10, servers=broker)
+    options = Option(host=superstream_host, learning_factor=10, servers=brokers)
 
     consumer = Consumer(config)
     consumer = superstream.init(token, superstream_host, config, options, consumer=consumer)

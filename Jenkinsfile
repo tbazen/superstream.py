@@ -76,12 +76,12 @@ pipeline {
         always {
             cleanWs()
         }
-        // success {
-        //     notifySuccessful()
-        // }
-        // failure {
-        //     notifyFailed()
-        // }
+        success {
+            notifySuccessful()
+        }
+        failure {
+            notifyFailed()
+        }
     }
 }
 

@@ -15,7 +15,7 @@ pipeline {
                         def version = readFile('version-beta.conf').trim()
                         // Set the VERSION environment variable to the version from the file
                         env.versionTag = version
-                        echo "Using version from version-beta.conf: ${env.VERSION}"
+                        echo "Using version from version-beta.conf: ${env.versionTag}"
                     } else {
                         def version = readFile('version.conf').trim()
                         env.versionTag = version
@@ -33,7 +33,7 @@ pipeline {
                 script {
                     if (env.BRANCH_NAME == 'test-pipeline') {
                         sh """
-                        sed -i -r "s/superstream/superstream-beta/g" setup.py
+                        sed -i -r "s/superstream/superstream-beta/g" yproject.toml
                     """
                     }
                 sh """ 

@@ -103,7 +103,7 @@ class Option(BaseModel):
         servers: str = "",
     ):
         super().__init__(
-            host="broker.superstream.dev",
+            host="",
             learning_factor=learning_factor,
             consumer_group=consumer_group,
             servers=servers,

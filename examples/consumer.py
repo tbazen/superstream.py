@@ -15,7 +15,7 @@ async def main():
     brokers = "<kafka-broker>"
     config = {
         "bootstrap.servers": brokers,
-        'security.protocol': 'SASL_SSL',
+        "security.protocol": "SASL_SSL",
         "sasl.mechanism": "PLAIN",
         "sasl.username": "",
         "sasl.password": "",
@@ -24,7 +24,7 @@ async def main():
         "enable.auto.offset.store": False,
         "statistics.interval.ms": 1000,
     }
-    options = Option(host=superstream_host, learning_factor=10, servers=brokers)
+    options = Option(learning_factor=10, servers=brokers)
 
     consumer = Consumer(config)
     consumer = superstream.init(token, superstream_host, config, options, consumer=consumer)

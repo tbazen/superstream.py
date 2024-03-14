@@ -17,14 +17,19 @@ def _name(obj):
     return obj.__class__.__name__
 
 
-def _try_convert_to_json(input) -> (bool, Optional[str]):
+def _try_convert_to_json(input) -> Optional[str]:
+    """
+    Tries to convert the input to a JSON string.
+    :param input: The input to convert to JSON.
+    :return: The JSON string or None if the input cannot be converted to JSON.
+    """
     try:
         if isinstance(input, str):
             json.loads(input)
-            return True, input
-        return True, json.dumps(input)
+            return input
+        return json.dumps(input)
     except Exception:
-        return False, None
+        return None
 
 
 def json_to_proto(json_dict: Union[dict, str], desc) -> bytes:

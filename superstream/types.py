@@ -98,12 +98,16 @@ class Option(BaseModel):
 
     def __init__(
         self,
-        host: str = "broker.superstream.dev",
         learning_factor: int = 0,
         consumer_group: str = "",
         servers: str = "",
     ):
-        super().__init__(host=host, learning_factor=learning_factor, consumer_group=consumer_group, servers=servers)
+        super().__init__(
+            host="broker.superstream.dev",
+            learning_factor=learning_factor,
+            consumer_group=consumer_group,
+            servers=servers,
+        )
 
     @validator("learning_factor")
     def validate_learning_factor(cls, v):

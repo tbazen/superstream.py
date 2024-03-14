@@ -68,7 +68,7 @@ class _Client:
         )
 
     async def handle_error(self, msg: str):
-        err_msg = f"[account name: {self.account_name}][clientID: {self.client_id}][sdk: python][version: {_SDK_VERSION}]{msg}"
+        err_msg = f"[account name: {self.account_name}][clientID: {self.client_id}][sdk: {_SDK_LANGUAGE}][version: {_SDK_VERSION}]{msg}"
         await manager._send_client_errors_to_backend(err_msg)
 
     async def send_register_schema_req(self):

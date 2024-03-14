@@ -3,8 +3,6 @@ from typing import Dict, List, Optional, Union
 
 import nats
 from confluent_kafka import Consumer, Producer
-from confluent_kafka.serialization import Serializer
-from nats.aio.errors import ErrAuthorization
 
 import superstream.manager as manager
 from superstream.client import _Client
@@ -15,7 +13,6 @@ from superstream.constants import (
 )
 from superstream.exceptions import ErrGenerateConnectionId
 from superstream.interceptors import _ConsumerInterceptor, _ProducerInterceptor
-from superstream.serialization import SuperstreamDeserializer
 from superstream.types import ClientConfig, ClientReconnectionUpdateReq, Option
 from superstream.utils import _name
 
@@ -45,6 +42,13 @@ async def _initialize_nats_connection(token: str, host: Union[str, List[str]]):
                 return
         _nats_connection_id = local_connection_id
 
+    async def error_cb(e):
+        """
+        Error callback for NATS connection errors.
+        It does nothing. Its purpose is to override the NATS default error callback that prints the error to the console on every reconnect attempt.
+        """
+        pass
+
     try:
         manager._broker_connection = await nats.connect(
             max_reconnect_attempts=_NATS_INFINITE_RECONNECT_ATTEMPTS,
@@ -53,45 +57,36 @@ async def _initialize_nats_connection(token: str, host: Union[str, List[str]]):
             password=token,
             servers=host,
             reconnected_cb=on_reconnected,
+            error_cb=error_cb,
         )
         manager._js_context = manager._broker_connection.jetstream()
         manager._nats_connection_id = await manager._generate_nats_connection_id()
-    except ErrAuthorization as e:
-        raise Exception("error connecting with superstream: unauthorized") from e
-    except Exception as e:
-        raise Exception(f"error connecting with superstream: {e!s}") from e
+    except Exception as exception:
+        if "nats: maximum account" in str(exception):
+            raise Exception(
+                "Cannot connect with superstream since you have reached the maximum amount of connected clients"
+            ) from exception
+        elif "invalid checksum" in str(exception):
+            raise Exception("Error connecting with superstream: unauthorized") from exception
+        else:
+            raise Exception(f"Error connecting with superstream: {exception!s}") from exception
 
 
-async def init_async(token: str, host: str, config: Dict, opts: Option) -> ClientConfig:
-    new_config = config
-
+async def init_async(token: str, host: str, config: Dict, opts: Option) -> int:
     client_type = "kafka"
     conf = _confluent_config_handler(client_type, config)
     new_client = _Client(config=conf, learning_factor=opts.learning_factor)
 
     if manager._broker_connection is None:
-        try:
-            await _initialize_nats_connection(token, host)
-        except Exception as e:
-            print("superstream: ", str(e))
-            return new_config
+        await _initialize_nats_connection(token, host)
 
     new_client.config.servers = opts.servers
     new_client.config.consumer_group_id = opts.consumer_group
-
-    try:
-        await new_client.register_client()
-    except Exception as e:
-        print("superstream: ", str(e))
-        return new_config
+    await new_client.register_client()
 
     manager._clients[new_client.client_id] = new_client
 
-    try:
-        await new_client.subscribe_updates()
-    except Exception as e:
-        print("superstream: ", str(e))
-        return new_config
+    await new_client.subscribe_updates()
 
     # ruff: noqa: RUF006
     asyncio.create_task(new_client.report_clients_update())
@@ -156,23 +151,9 @@ def _confluent_config_handler(client_type: str, confluent_config: dict) -> Clien
     return conf
 
 
-def configure_deserializer(client_id: int, deserializer: Serializer):
-    hash = deserializer.__hash__()
-    manager._client_object_cache[hash] = client_id
-    return deserializer
-
-
-def create_deserializer(client_id: int) -> Serializer:
-    deserializer = SuperstreamDeserializer()
-    configure_deserializer(client_id, deserializer)
-    return deserializer
-
-
 async def _init_producer(
     token: str, host: str, config: Dict, opts: Option, producer: Optional[Producer] = None
 ) -> Producer:
-    if producer is None:
-        raise Exception("superstream: producer should be provided")
     client_id = await init_async(token, host, config, opts)
     return _ProducerInterceptor(client_id, config)
 
@@ -180,8 +161,6 @@ async def _init_producer(
 async def _init_consumer(
     token: str, host: str, config: Dict, opts: Option, consumer: Optional[Consumer] = None
 ) -> Consumer:
-    if consumer is None:
-        raise Exception("superstream: consumer should be provided")
     client_id = await init_async(token, host, config, opts)
     return _ConsumerInterceptor(client_id, config)
 
@@ -196,7 +175,10 @@ def init(
 ) -> Union[Producer, Consumer]:
     if producer is None and consumer is None:
         raise Exception("superstream: either producer or consumer should be provided")
-
-    if producer is not None:
-        return asyncio.run(_init_producer(token, host, config, opts, producer))
-    return asyncio.run(_init_consumer(token, host, config, opts, consumer))
+    try:
+        if producer is not None:
+            return asyncio.run(_init_producer(token, host, config, opts, producer))
+        return asyncio.run(_init_consumer(token, host, config, opts, consumer))
+    except Exception as e:
+        print("superstream: ", str(e))
+        return producer or consumer

@@ -20,10 +20,10 @@ To use `superstream` with kafka producer, first define the kafka and superstream
 ```python
 token = "<superstream-token>"
 superstream_host = "<superstream-host>"
-broker = "<kafka-broker>"
+brokers = "<kafka-broker>"
 topic = "<kafka-topic>"
-config = {"bootstrap.servers": broker}
-options = Option(learning_factor=10, servers=broker)
+config = {"bootstrap.servers": brokers}
+options = Option(learning_factor=10, servers=brokers)
 ```
 
 To initialize superstream, use `init` function and pass the producer instance as an argument:
@@ -54,12 +54,12 @@ token = "<superstream-token>"
 superstream_host = "<superstream-host>"
 group = "<kafka-consumer-group>"
 topics = ["<kafka-topic>"]
-broker = "<kafka-broker>"
+brokers = "<kafka-broker>"
 config = {
-    "bootstrap.servers": broker,
+    "bootstrap.servers": brokers,
     "group.id": group
 }
-options = Option(learning_factor=10, servers=broker)
+options = Option(learning_factor=10, servers=brokers)
 ```
 
 To initialize superstream, use `init` function and pass the consumer instance as an argument:

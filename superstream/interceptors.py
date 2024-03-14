@@ -187,7 +187,6 @@ class _ProducerInterceptor(Producer):
 
         else:
             client.counters.total_bytes_after_reduction += len(byte_msg)
-            client.counters.total_messages_failed_produce += 1
             if client.learning_factor_counter <= client.learning_factor:
                 await client.send_learning_message(byte_msg)
                 client.learning_factor_counter += 1

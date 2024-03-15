@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Union
 
 import nats
 from confluent_kafka import Consumer, Producer
+from nats.errors import Error as NatsError
 
 import superstream.manager as manager
 from superstream.client import _Client
@@ -42,12 +43,21 @@ async def _initialize_nats_connection(token: str, host: Union[str, List[str]]):
                 return
         _nats_connection_id = local_connection_id
 
-    async def error_cb(e):
+    async def error_cb(e: NatsError):
         """
         Error callback for NATS connection errors.
         It does nothing. Its purpose is to override the NATS default error callback that prints the error to the console on every reconnect attempt.
         """
-        pass
+        if e is None:
+            return
+        critical_errors = [
+            "invalid checksum",
+            "nats: maximum account",
+            "authorization violation",
+        ]
+        for error in critical_errors:
+            if error.lower() in str(e).lower():
+                raise e
 
     try:
         manager._broker_connection = await nats.connect(

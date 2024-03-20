@@ -23,6 +23,8 @@ async def main():
         "session.timeout.ms": 6000,
         "enable.auto.offset.store": False,
         "statistics.interval.ms": 1000,
+        'auto.offset.reset': 'latest',
+        'max.poll.interval.ms': 600000,
     }
     options = Option(learning_factor=10, servers=brokers)
 

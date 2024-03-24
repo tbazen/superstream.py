@@ -26,14 +26,14 @@ class _ClientUpdateSubscription:
         clients = manager._clients
         while True:
             msg = await self.update_queue.get()
-            if msg.Type == _LEARNED_SCHEMA:
+            if msg.type == _LEARNED_SCHEMA:
                 if self.client_id in clients:
                     client = clients[self.client_id]
                     try:
-                        decoded = base64.b64decode(msg.Payload)
+                        decoded = base64.b64decode(msg.payload)
                         schema_update_req = SchemaUpdateReq.model_validate_json(decoded)
                     except Exception as e:
-                        client.handle_error(
+                        await client.handle_error(
                             f"{_name(self.updates_handler)}: error parsing schema update request: {e!s}"
                         )
                         continue
@@ -44,13 +44,13 @@ class _ClientUpdateSubscription:
                         client.producer_proto_desc = desc
                         client.producer_schema_id = schema_update_req.schema_id
                     else:
-                        client.handle_error(f"{_name(self.updates_handler)}: error compiling descriptor")
+                        await client.handle_error(f"{_name(self.updates_handler)}: error compiling descriptor")
 
     async def subscription_handler(self, msg: Msg):
         clients = manager._clients
         try:
             update = Update.model_validate_json(msg.data)
         except Exception as e:
-            clients[self.client_id].handle_error(f"{_name(self.subscription_handler)}: {e!s}")
+            await clients[self.client_id].handle_error(f"{_name(self.subscription_handler)}: {e!s}")
             return
         await self.update_queue.put(update)

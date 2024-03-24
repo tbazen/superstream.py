@@ -14,8 +14,8 @@ class ClientTypeUpdateReq(BaseModel):
 
 
 class Update(BaseModel):
-    Type: str
-    Payload: bytes
+    type: str
+    payload: bytes
 
 
 class SchemaUpdateReq(BaseModel):

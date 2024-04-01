@@ -33,7 +33,7 @@ pipeline {
                 script {
                     if (env.BRANCH_NAME == 'master') {
                         sh """
-                        sed -i -r "s/superstream/superstream-beta/g" pyproject.toml
+                        sed -i -r "s/superstream-py/superstream-py-beta/g" pyproject.toml
                     """
                     }
                 sh "sed -i -r 's/version = \"[0-9]+\\.[0-9]+\\.[0-9]+\"/version = \"$versionTag\"/g' pyproject.toml"

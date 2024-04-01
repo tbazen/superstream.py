@@ -3,7 +3,7 @@
 ## Installation
 
 ```sh
- pip install superstream
+ pip install superstream-py
 ```
 
 ## Importing

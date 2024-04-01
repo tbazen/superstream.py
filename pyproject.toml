@@ -1,9 +1,9 @@
 [project]
-name = "superstream"
+name = "superstream-py"
 version = "0.1.0"
-description = "Default template for PDM package"
+description = "superstream"
 authors = [
-    {name = "Dev", email = "placeholder@temp.mail"},
+    {name = "Memphis.dev team", email = "team@memphis.dev"},
 ]
 dependencies = [
     "pydantic>=2.6.3",

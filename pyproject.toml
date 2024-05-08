@@ -3,7 +3,7 @@ name = "superstream-py"
 version = "0.1.0"
 description = "superstream"
 authors = [
-    {name = "Memphis.dev team", email = "team@memphis.dev"},
+    {name = "Superstream team", email = "support@superstream.ai"},
 ]
 dependencies = [
     "pydantic>=2.6.3",

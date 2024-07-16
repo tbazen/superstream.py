@@ -3,9 +3,6 @@ import sys
 
 from confluent_kafka import Consumer, KafkaException
 
-import superstream
-from superstream.types import Option
-
 
 async def main():
     token = "<superstream-token>"
@@ -23,13 +20,11 @@ async def main():
         "session.timeout.ms": 6000,
         "enable.auto.offset.store": False,
         "statistics.interval.ms": 1000,
-        'auto.offset.reset': 'latest',
-        'max.poll.interval.ms': 600000,
+        "auto.offset.reset": "latest",
+        "max.poll.interval.ms": 600000,
     }
-    options = Option(learning_factor=10, servers=brokers)
 
     consumer = Consumer(config)
-    consumer = superstream.init(token, superstream_host, config, options, consumer=consumer)
     consumer.subscribe(topics)
 
     try:

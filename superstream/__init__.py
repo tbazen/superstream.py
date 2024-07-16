@@ -1,5 +1,5 @@
 import nest_asyncio
 
-from superstream.connection import init  # noqa: F401
+from superstream.core import Superstream  # noqa: F401
 
 nest_asyncio.apply()

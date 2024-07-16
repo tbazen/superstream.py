@@ -6,14 +6,9 @@ import sys
 
 from confluent_kafka import Producer
 
-import superstream
-from superstream.types import Option
-
 
 async def main():
     try:
-        token = "<superstream-token>"
-        superstream_host = "<superstream-host>"
         brokers = "<kafka-broker>"
         topic = "<kafka-topic>"
         config = {
@@ -23,10 +18,8 @@ async def main():
             "sasl.username": "",
             "sasl.password": "",
         }
-        options = Option(learning_factor=10, servers=brokers)
 
         producer = Producer(config)
-        producer = superstream.init(token, superstream_host, config, options, producer=producer)
 
         def delivery_callback(err, msg):
             if err:

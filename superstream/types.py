@@ -1,15 +1,15 @@
-from typing import Dict, List
+from typing import Any, Dict, List
 
-from pydantic import BaseModel, validator
+from pydantic import BaseModel
 
 
 class ClientReconnectionUpdateReq(BaseModel):
     new_nats_connection_id: str
-    client_id: int
+    client_hash: str
 
 
 class ClientTypeUpdateReq(BaseModel):
-    client_id: int
+    client_hash: str
     type: str
 
 
@@ -60,7 +60,7 @@ class TopicsPartitionsPerProducerConsumer(BaseModel):
     consumer_group_topics_partitions: Dict[str, List[int]]
 
 
-class ClientCounters(BaseModel):
+class SuperstreamCounters(BaseModel):
     total_bytes_before_reduction: int
     total_bytes_after_reduction: int
     total_messages_successfully_produce: int
@@ -68,11 +68,53 @@ class ClientCounters(BaseModel):
     total_messages_failed_produce: int
     total_messages_failed_consume: int
 
+    def reset(self):
+        self.total_bytes_before_reduction = 0
+        self.total_bytes_after_reduction = 0
+        self.total_messages_successfully_produce = 0
+        self.total_messages_successfully_consumed = 0
+        self.total_messages_failed_produce = 0
+        self.total_messages_failed_consume = 0
+
+    def increment_total_bytes_before_reduction(self, bytes):
+        self.total_bytes_before_reduction += bytes
+
+    def increment_total_bytes_after_reduction(self, bytes):
+        self.total_bytes_after_reduction += bytes
+
+    def increment_total_messages_successfully_produce(self):
+        self.total_messages_successfully_produce += 1
+
+    def increment_total_messages_successfully_consumed(self):
+        self.total_messages_successfully_consumed += 1
+
+    def increment_total_messages_failed_produce(self):
+        self.total_messages_failed_produce += 1
+
+    def increment_total_messages_failed_consume(self):
+        self.total_messages_failed_consume += 1
+
+
+class LearnedSchemaUpdate(BaseModel):
+    master_msg_name: str
+    file_name: str
+    schema_id: str
+    desc: bytes
+
+
+class ToggleReductionUpdate(BaseModel):
+    enable_reduction: bool
+
+
+class CompressionUpdate(BaseModel):
+    enable_compression: bool
+    compression_type: str
+
 
 class RegisterResp(BaseModel):
-    client_id: int
     account_name: str
     learning_factor: int
+    client_hash: str
 
 
 class RegisterReq(BaseModel):
@@ -80,30 +122,7 @@ class RegisterReq(BaseModel):
     language: str
     version: str
     learning_factor: int
-    config: ClientConfig
-
-
-class Option(BaseModel):
-    host: str
-    learning_factor: int
-    consumer_group: str
-    servers: str
-
-    def __init__(
-        self,
-        learning_factor: int = 0,
-        consumer_group: str = "",
-        servers: str = "",
-    ):
-        super().__init__(
-            host="",
-            learning_factor=learning_factor,
-            consumer_group=consumer_group,
-            servers=servers,
-        )
-
-    @validator("learning_factor")
-    def validate_learning_factor(cls, v):
-        if v < 0 or v > 10_000:
-            raise ValueError("learning factor should be in range of 0 to 10000")
-        return v
+    config: Dict[str, Any]
+    reduction_enabled: bool
+    connection_id: int
+    tags: str

@@ -5,10 +5,10 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "[LOC:PRODUCER]",
+            "name": "[PRODUCER]",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/examples/producer.py",
+            "program": "${workspaceFolder}/env/local/producer.py",
             "console": "integratedTerminal",
             "env": {
                 "SUPERSTREAM_LEARNING_FACTOR": "20",
@@ -19,10 +19,10 @@
             }
         },
         {
-            "name": "[LOC:CONSUMER]",
+            "name": "[CONSUMER]",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/examples/consumer.py",
+            "program": "${workspaceFolder}/env/local/consumer.py",
             "console": "integratedTerminal",
             "env": {
                 "SUPERSTREAM_LEARNING_FACTOR": "20",

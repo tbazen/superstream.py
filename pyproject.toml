@@ -10,7 +10,6 @@ dependencies = [
     "nats-py>=2.7.2",
     "protobuf>=4.25.3",
     "asyncio>=3.4.3",
-    "confluent-kafka>=2.3.0",
     "requests>=2.31.0",
     "jsonschema>=4.21.1",
     "nest-asyncio>=1.6.0",
@@ -37,6 +36,9 @@ fmt = "ruff format ."
 [tool.pdm.dev-dependencies]
 lint = [
     "ruff>=0.3.0",
+]
+dev = [
+    "confluent-kafka==2.4.0",
 ]
 
 [tool.ruff]

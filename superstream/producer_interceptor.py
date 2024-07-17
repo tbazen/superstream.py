@@ -2,18 +2,17 @@ import asyncio
 from typing import Any, Dict, Union
 
 import zstandard as zstd
-from confluent_kafka import Producer
 
 from superstream.constants import _PRODUCER_CLIENT_TYPE, _SUPERSTREAM_CONNECTION_KEY
 from superstream.core import Superstream
 from superstream.utils import _try_convert_to_json, json_to_proto
 
 
-class SuperstreamProducerInterceptor(Producer):
-    def __init__(self, config: Dict):
-        super().__init__(config)
+class SuperstreamProducerInterceptor:
+    def __init__(self, config: Dict, producer_handler):
         self._compression_type = "zstd"
         self._superstream_config_ = Superstream.init_superstream_props(config, _PRODUCER_CLIENT_TYPE)
+        self._producer_handler = producer_handler
 
     def produce(self, *args, **kwargs):
         topic_index = 0
@@ -22,7 +21,7 @@ class SuperstreamProducerInterceptor(Producer):
         headers_index = 6
         superstream: Superstream = self._superstream_config_.get(_SUPERSTREAM_CONNECTION_KEY)
         if not superstream:
-            super().produce(*args, **kwargs)
+            self._producer_handler(*args, **kwargs)
             return
 
         topic = args[topic_index]
@@ -30,13 +29,13 @@ class SuperstreamProducerInterceptor(Producer):
         superstream.update_topic_partitions(topic, partition)
 
         if not superstream.superstream_ready:
-            super().produce(*args, **kwargs)
+            self._producer_handler(*args, **kwargs)
             return
 
         msg = args[value_index] if len(args) > value_index else kwargs.get("value")
         json_msg = _try_convert_to_json(msg)
         if json_msg is None:
-            super().produce(*args, **kwargs)
+            self._producer_handler(*args, **kwargs)
             return
 
         serialized_msg, superstream_headers = self._serialize(json_msg)
@@ -62,7 +61,7 @@ class SuperstreamProducerInterceptor(Producer):
         elif "value" in kwargs:
             kwargs["value"] = serialized_msg
 
-        super().produce(*args, **kwargs)
+        self._producer_handler(*args, **kwargs)
 
     def _serialize(self, json_msg: str) -> Union[bytes, Dict[str, Any]]:
         superstream: Superstream = self._superstream_config_.get(_SUPERSTREAM_CONNECTION_KEY)

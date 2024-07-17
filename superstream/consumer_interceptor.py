@@ -1,18 +1,15 @@
 import asyncio
 import sys
 import time
-from typing import Dict, List, Optional
-
-from confluent_kafka import Consumer, Message
+from typing import Any, Dict, List, Optional
 
 from superstream.constants import _CONSUMER_CLIENT_TYPE, _SUPERSTREAM_CONNECTION_KEY
 from superstream.core import Superstream
 from superstream.utils import proto_to_json
 
 
-class SuperstreamConsumerInterceptor(Consumer):
+class SuperstreamConsumerInterceptor:
     def __init__(self, config: Dict):
-        super().__init__(config)
         self._superstream_config_ = Superstream.init_superstream_props(config, _CONSUMER_CLIENT_TYPE)
 
     def __update_topic_partitions(self, message):
@@ -23,19 +20,17 @@ class SuperstreamConsumerInterceptor(Consumer):
         partition = message.partition()
         superstream.update_topic_partitions(topic, partition)
 
-    def poll(self, *args, **kwargs) -> Optional[Message]:
-        message = super().poll(*args, **kwargs)
+    def poll(self, message) -> Any:
         if message is None:
             return message
         return self.__intercept(message)
 
-    def consume(self, *args, **kwargs) -> Optional[List[Message]]:
-        messages = super().consume(*args, **kwargs)
+    def consume(self, messages) -> Optional[List[Any]]:
         if messages is None:
             return messages
         return [self.__intercept(message) for message in messages]
 
-    def __intercept(self, message: Message) -> Optional[Message]:
+    def __intercept(self, message: Any) -> Any:
         if not message:
             return message
         self.__update_topic_partitions(message)
@@ -45,7 +40,7 @@ class SuperstreamConsumerInterceptor(Consumer):
             print(f"error deserializing message: {e!s}")
             return message
 
-    async def __deserialize(self, message: Message) -> Message:
+    async def __deserialize(self, message: Any) -> Any:
         superstream: Superstream = self._superstream_config_.get(_SUPERSTREAM_CONNECTION_KEY)
         message_value = message.value()
         headers = message.headers()

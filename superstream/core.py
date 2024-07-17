@@ -8,7 +8,6 @@ import uuid
 from typing import Any, Dict, List, Optional, Union
 
 import nats
-from confluent_kafka import Consumer
 from google.protobuf.descriptor import Descriptor
 from nats.aio.client import Client as NatsClient
 from nats.errors import Error as NatsError
@@ -42,6 +41,7 @@ from superstream.constants import (
     _SUPERSTREAM_UPDATES_SUBJECT,
 )
 from superstream.exceptions import ErrGenerateConnectionId
+from superstream.factory import SuperstreamFactory
 from superstream.types import (
     ClientReconnectionUpdateReq,
     ClientTypeUpdateReq,
@@ -399,7 +399,7 @@ class Superstream:
                 }
             )
             topics = [_SUPERSTREAM_METADATA_TOPIC]
-            c = Consumer(config)
+            c = SuperstreamFactory.create_consumer(config)
             c.subscribe(topics)
             limit = 3
             while True:

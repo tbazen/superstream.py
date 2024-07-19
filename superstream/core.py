@@ -266,7 +266,7 @@ class Superstream:
             raise Exception("superstream: error compiling schema")
 
     async def register_client(self):
-        kafka_id = self.consume_connection_id()
+        kafka_id = self.consume_latest_connection_id()
 
         def normalize_to_superstreamconfig(configs):
             superstream_config = {}
@@ -383,38 +383,43 @@ class Superstream:
                     relevant_props[key] = str(configs[key])
         return relevant_props
 
-    def consume_connection_id(self) -> str:
+    def consume_latest_connection_id(self) -> str:
+        retries = 2
         try:
             config = self.copy_auth_config()
             config.update(
                 {
-                    # TODO:
-                    # - offset should be set to latest
-                    # - group.id?
-                    # - invalid properties
-                    #   - max.poll.records
-                    #   - _SUPERSTREAM_INNER_CONSUMER_KEY
-                    "auto.offset.reset": "earliest",
                     "group.id": f"superstream-consumer-group-{uuid.uuid4()}",
+                    "enable.auto.commit": False,
                 }
             )
-            topics = [_SUPERSTREAM_METADATA_TOPIC]
+            topic = _SUPERSTREAM_METADATA_TOPIC
             c = SuperstreamFactory.create_consumer(config)
-            c.subscribe(topics)
-            limit = 3
-            while True:
-                msg = c.poll(timeout=1.0)
-                if msg is None:
-                    if limit == 0:
-                        return "0"
-                    continue
-                if msg.error():
-                    raise Exception(msg.error())
-                else:
-                    return msg.value().decode("utf-8")
+            partitions = c.list_topics().topics[topic].partitions
+            if not partitions:
+                return "0"
+            topic_partitions = [SuperstreamFactory.create_topic_partition(topic, partition) for partition in partitions]
+            end_offsets = [c.get_watermark_offsets(tp) for tp in topic_partitions]
+            topic_partitions = [
+                SuperstreamFactory.create_topic_partition(topic, p, offset=end_offset[1] - 1)
+                for p, end_offset in zip(partitions, end_offsets)
+            ]
 
+            c.assign(topic_partitions)
+            while retries > 0:
+                msg = c.poll(timeout=10.0)
+                if msg is None or msg.error():
+                    retries -= 1
+                    continue
+
+                return msg.value().decode("utf-8")
+
+        except Exception as e:
+            self.handle_error(f"{_name(self.consume_latest_connection_id)}: {e!s}")
+            return "0"
         finally:
-            c.close()
+            if c:
+                c.close()
 
     def _generate_nats_connection_id(self) -> str:
         try:

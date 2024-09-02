@@ -3,15 +3,16 @@ from typing import Any, Dict, Union
 
 import zstandard as zstd
 
-from superstream.constants import _PRODUCER_CLIENT_TYPE, _SUPERSTREAM_CONNECTION_KEY
+from superstream.constants import _SUPERSTREAM_CONNECTION_KEY
 from superstream.core import Superstream
+from superstream.types import SuperstreamClientType
 from superstream.utils import _try_convert_to_json, json_to_proto
 
 
 class SuperstreamProducerInterceptor:
     def __init__(self, config: Dict, producer_handler):
         self._compression_type = "zstd"
-        self._superstream_config_ = Superstream.init_superstream_props(config, _PRODUCER_CLIENT_TYPE)
+        self._superstream_config_ = Superstream.init_superstream_props(config, SuperstreamClientType.PRODUCER)
         self._producer_handler = producer_handler
 
     def produce(self, *args, **kwargs):
@@ -63,14 +64,19 @@ class SuperstreamProducerInterceptor:
 
         self._producer_handler(*args, **kwargs)
 
+    def update_stats(self, state: Dict[str, Any]):
+        print(state)
+        # raise NotImplementedError
+
     def _serialize(self, json_msg: str) -> Union[bytes, Dict[str, Any]]:
         superstream: Superstream = self._superstream_config_.get(_SUPERSTREAM_CONNECTION_KEY)
         byte_msg = json_msg.encode("utf-8")
         headers: Dict[str, Any] = {}
 
-        superstream.client_counters.total_bytes_before_reduction += len(byte_msg)
+        # superstream.client_counters.total_bytes_before_reduction += len(byte_msg)
 
-        if superstream.producer_proto_desc:
+        # if superstream.producer_proto_desc:
+        if False:
             try:
                 byte_msg = json_to_proto(byte_msg, superstream.producer_proto_desc)
                 superstream.client_counters.total_messages_successfully_produce += 1

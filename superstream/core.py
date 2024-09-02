@@ -1,7 +1,7 @@
 import asyncio
 import base64
 import json
-import os
+import socket
 import sys
 import threading
 import uuid
@@ -14,35 +14,27 @@ from nats.errors import Error as NatsError
 from nats.js import JetStreamContext
 
 from superstream.constants import (
-    _CLIENT_RECONNECTION_UPDATE_SUBJECT,
-    _CLIENT_REGISTER_SUBJECT,
-    _CLIENT_START_SUBJECT,
-    _CLIENT_TYPE_UPDATE_SUBJECT,
-    _CONSUMER_CLIENT_TYPE,
     _NATS_INFINITE_RECONNECT_ATTEMPTS,
-    _PRODUCER_CLIENT_TYPE,
     _SDK_LANGUAGE,
     _SDK_VERSION,
-    _SUPERSTREAM_CLIENTS_UPDATE_SUBJECT,
     _SUPERSTREAM_CONNECTION_KEY,
-    _SUPERSTREAM_DEFAULT_LEARNING_FACTOR,
-    _SUPERSTREAM_DEFAULT_TOKEN,
-    _SUPERSTREAM_ERROR_SUBJECT,
-    _SUPERSTREAM_GET_SCHEMA_SUBJECT,
     _SUPERSTREAM_HOST_KEY,
     _SUPERSTREAM_INTERNAL_USERNAME,
     _SUPERSTREAM_LEARNING_FACTOR_KEY,
-    _SUPERSTREAM_LEARNING_SUBJECT,
     _SUPERSTREAM_METADATA_TOPIC,
     _SUPERSTREAM_REDUCTION_ENABLED_KEY,
-    _SUPERSTREAM_REGISTER_SCHEMA_SUBJECT,
     _SUPERSTREAM_TAGS_KEY,
     _SUPERSTREAM_TOKEN_KEY,
-    _SUPERSTREAM_UPDATES_SUBJECT,
+    EnvVars,
+    SuperstreamSubjects,
+    SuperstreamValues,
 )
 from superstream.exceptions import ErrGenerateConnectionId
 from superstream.factory import SuperstreamFactory
+from superstream.std import SuperstreamStd
 from superstream.types import (
+    ClientConfigUpdateReq,
+    ClientCounterUpdateRequest,
     ClientReconnectionUpdateReq,
     ClientTypeUpdateReq,
     CompressionUpdate,
@@ -51,13 +43,14 @@ from superstream.types import (
     RegisterReq,
     RegisterResp,
     SchemaUpdateReq,
+    SuperstreamClientType,
     SuperstreamCounters,
     ToggleReductionUpdate,
     TopicsPartitionsPerProducerConsumer,
     Update,
 )
 from superstream.update_manager import SuperstreamUpdateManager
-from superstream.utils import _name, compile_descriptor
+from superstream.utils import KafkaUtil, _name, compile_descriptor
 
 
 class Superstream:
@@ -77,10 +70,13 @@ class Superstream:
     client_type: str
     tags: str
     compression_enabled: bool
+    compression_type: str = "zstd"
     client_counters: SuperstreamCounters
-    client_hash: str
     topic_partitions: Dict[str, List[int]]
 
+    client_ip: str
+    client_host: str
+    client_hash: str
     broker_connection: NatsClient
     jetstream: JetStreamContext
     nats_connection_id: str
@@ -94,25 +90,35 @@ class Superstream:
 
     start_sub: Any
 
+    std: SuperstreamStd
+
+    full_client_configs: Dict[str, Any]
+    superstream_configs: Dict[str, Any]
+    kafka_connection_id: int
+
+    compression_turned_off_by_superstream: bool = False
+
     def __init__(
         self,
         token: str,
         host: str,
         learning_factor: int,
         configs: Dict[str, Any],
-        reduction_enabled: bool,
+        enable_reduction: bool,
         client_type: str,
-        tags: str,
+        tags: str = "",
+        enable_compression: bool = False,
     ):
         self.learning_factor = learning_factor
         self.token = token
         self.host = host
-        self.reduction_enabled = reduction_enabled
+        self.reduction_enabled = enable_reduction
+        self.compression_enabled = enable_compression
         self.client_type = client_type
-        self.compression_enabled = os.getenv("SUPERSTREAM_COMPRESSION_ENABLED", "") == "true"
         self.configs = configs
         self.tags = tags
         self.topic_partitions = {}
+        self.std = SuperstreamStd()
 
         self.learning_factor_counter = 0
         self.learning_request_sent = False
@@ -120,14 +126,9 @@ class Superstream:
         self.producer_proto_desc = None
 
         self.consumer_proto_desc_map = {}
-        self.client_counters = SuperstreamCounters(
-            total_bytes_before_reduction=0,
-            total_bytes_after_reduction=0,
-            total_messages_successfully_produce=0,
-            total_messages_successfully_consumed=0,
-            total_messages_failed_produce=0,
-            total_messages_failed_consume=0,
-        )
+        self.client_counters = SuperstreamCounters()
+
+        self.client_hash = None
 
     async def _request(self, subject: str, payload: bytes, timeout: float = 30, timeout_retries: int = 1):
         """
@@ -143,7 +144,7 @@ class Superstream:
             return await self._request(subject, payload, timeout=timeout, timeout_retries=timeout_retries - 1)
 
     async def _send_client_errors_to_backend(self, err_msg: str):
-        await self._publish(_SUPERSTREAM_ERROR_SUBJECT, err_msg.encode())
+        await self._publish(SuperstreamSubjects.CLIENT_ERRORS, err_msg.encode())
 
     async def _publish(self, subject: str, payload: bytes):
         await self.broker_connection.publish(subject, payload)
@@ -155,20 +156,22 @@ class Superstream:
         if self.broker_connection is None or self.superstream_ready is False:
             return
         err_msg = f"[sdk: {_SDK_LANGUAGE}][version: {_SDK_VERSION}][tags: {self.tags}] {msg}"
+        if self.client_hash is not None and self.client_hash != "":
+            err_msg = f"[clientHash: {self.client_hash}] {err_msg}"
         await self._send_client_errors_to_backend(err_msg)
 
     async def send_register_schema_req(self):
         if self.learning_request_sent:
             return
         try:
-            await self._publish(_SUPERSTREAM_REGISTER_SCHEMA_SUBJECT % self.client_hash, b"")
+            await self._publish(SuperstreamSubjects.REGISTER_SCHEMA % self.client_hash, b"")
             self.learning_request_sent = True
         except Exception as e:
             await self.handle_error(f"{_name(self.send_register_schema_req)} at publish {e!s}")
 
     async def send_learning_message(self, msg: bytes):
         try:
-            await self._publish(_SUPERSTREAM_LEARNING_SUBJECT % self.client_hash, msg)
+            await self._publish(SuperstreamSubjects.LEARN_SCHEMA % self.client_hash, msg)
         except Exception as e:
             await self.handle_error(f"{_name(self.send_learning_message)} at publish {e!s}")
 
@@ -176,47 +179,99 @@ class Superstream:
         if not self.client_type:
             return
 
-        is_valid_client_type = self.client_type == _CONSUMER_CLIENT_TYPE or self.client_type == _PRODUCER_CLIENT_TYPE
-        if not is_valid_client_type:
+        if self.client_type not in [SuperstreamClientType.PRODUCER.value, SuperstreamClientType.CONSUMER.value]:
             return
 
         try:
             await self._publish(
-                _CLIENT_TYPE_UPDATE_SUBJECT,
+                SuperstreamSubjects.CLIENT_TYPE_UPDATE,
                 ClientTypeUpdateReq(client_hash=self.client_hash, type=self.client_type).model_dump_json().encode(),
             )
         except Exception as e:
             await self.handle_error(f"{_name(self.send_client_type_update_req)} at publish {e!s}")
 
+    async def wait_for_can_start(self):
+        async def check_can_start():
+            while not self.can_start:
+                asyncio.sleep(1)
+
+        try:
+            await asyncio.wait_for(check_can_start(), timeout=SuperstreamValues.MAX_TIME_WAIT_CAN_START)
+            if not self.can_start:
+                raise Exception("could not start within the expected timeout period")
+        except Exception as e:
+            self.std.error(f"superstream {e}")
+
+    async def execute_send_client_config_update_req_with_wait(self):
+        try:
+            await self.wait_for_can_start()
+            await self.send_client_config_update_req()
+        except Exception as e:
+            self.std.error(f"superstream: error sending client config update request: {e!s}")
+
+    async def wait_for_superstream_configs(self):
+        async def check_superstream_configs():
+            while not self.superstream_configs:
+                await asyncio.sleep(1)
+
+        timeout = EnvVars.SUPERSTREAM_RESPONSE_TIMEOUT or SuperstreamValues.DEFAULT_SUPERSTREAM_TIMEOUT
+
+        try:
+            await asyncio.wait_for(check_superstream_configs(), timeout=timeout)
+            if not self.superstream_configs:
+                raise Exception("client configuration was not set within the expected timeout period")
+        except Exception as e:
+            self.std.error(f"superstream {e}")
+
     async def report_clients_update(self):
         async def client_update_task():
-            try:
-                if not self.broker_connection or not self.superstream_ready:
-                    return
-                topic_partition_payload = TopicsPartitionsPerProducerConsumer(
-                    producer_topics_partitions={}, consumer_group_topics_partitions={}
+            async def update_client_counters():
+                backup_read_bytes = self.client_counters.get_total_read_bytes_reduced()
+                backup_write_bytes = self.client_counters.get_total_write_bytes_reduced()
+                self.client_counters.reset()
+
+                request = ClientCounterUpdateRequest.from_superstream_counters(
+                    self.client_counters, self.kafka_connection_id
                 )
-                if self.topic_partitions:
+                try:
+                    await self._publish(
+                        SuperstreamSubjects.CLIENTS_UPDATE % ("counters", self.client_hash),
+                        request.model_dump_json().encode(),
+                    )
+                except Exception as e:
+                    self.client_counters.increment_total_read_bytes_reduced(backup_read_bytes)
+                    self.client_counters.increment_total_write_bytes_reduced(backup_write_bytes)
+                    await self.handle_error(f"{_name(self.report_clients_update)} at publish {e!s}")
+
+            async def update_client_topic_partitions():
+                try:
                     topic_partition_payload = TopicsPartitionsPerProducerConsumer(
-                        producer_topics_partitions=self.topic_partitions
-                        if self.client_type == _PRODUCER_CLIENT_TYPE
-                        else {},
-                        consumer_group_topics_partitions=self.topic_partitions
-                        if self.client_type == _CONSUMER_CLIENT_TYPE
-                        else {},
+                        producer_topics_partitions={},
+                        consumer_group_topics_partitions={},
+                        connection_id=self.kafka_connection_id,
+                    )
+                    if self.topic_partitions:
+                        topic_partition_payload = TopicsPartitionsPerProducerConsumer(
+                            producer_topics_partitions=self.topic_partitions
+                            if self.client_type == SuperstreamClientType.PRODUCER.value
+                            else {},
+                            consumer_group_topics_partitions=self.topic_partitions
+                            if self.client_type == SuperstreamClientType.CONSUMER.value
+                            else {},
+                        )
+                    await self._publish(
+                        SuperstreamSubjects.CLIENTS_UPDATE % ("config", self.client_hash),
+                        topic_partition_payload.model_dump_json().encode(),
                     )
 
-                await self._publish(
-                    _SUPERSTREAM_CLIENTS_UPDATE_SUBJECT % ("counters", self.client_hash),
-                    self.client_counters.model_dump_json().encode(),
-                )
-                await self._publish(
-                    _SUPERSTREAM_CLIENTS_UPDATE_SUBJECT % ("config", self.client_hash),
-                    topic_partition_payload.model_dump_json().encode(),
-                )
+                except Exception as e:
+                    await self.handle_error(f"{_name(self.report_clients_update)}: {e!s}")
 
-            except Exception as e:
-                self.handle_error(f"{_name(self.report_clients_update)}: {e!s}")
+            if not self.broker_connection or not self.superstream_ready:
+                return
+
+            await update_client_counters()
+            await update_client_topic_partitions()
 
         async def start_periodic_task(interval, update_task):
             async def task_wrapper():
@@ -240,153 +295,93 @@ class Superstream:
             raise e
 
     async def send_get_schema_request(self, schema_id: str):
-        self.get_schema_request_sent = True
         req_bytes = GetSchemaReq(schema_id=schema_id).model_dump_json().encode()
 
         try:
-            msg = await self._request(_SUPERSTREAM_GET_SCHEMA_SUBJECT % self.client_hash, req_bytes, 30)
+            msg = await self._request(SuperstreamSubjects.GET_SCHEMA % self.client_hash, req_bytes, 30)
+            resp = SchemaUpdateReq.model_validate_json(msg.data)
+            desc = self._compile_descriptor(resp.desc, resp.master_msg_name, resp.file_name)
+            if desc is not None:
+                self.consumer_proto_desc_map[resp.schema_id] = desc
+            else:
+                await self.handle_error(f"{_name(self.send_get_schema_request)}: error compiling schema")
+                raise Exception("superstream: error compiling schema")
         except Exception as e:
             await self.handle_error(f"{_name(self.send_get_schema_request)} at request {e!s}")
-            self.get_schema_request_sent = False
-            raise e
 
+    async def send_client_config_update_req(self):
         try:
-            resp = SchemaUpdateReq.model_validate_json(msg.data)
+            # req = ClientConfigUpdateReq(client_hash=self.client_hash, config=self.full_client_configs)
+            req = ClientConfigUpdateReq(client_hash=self.client_hash, config=self.configs)
+            await self._publish(SuperstreamSubjects.CLIENT_CONFIG_UPDATE, req.model_dump_json().encode())
         except Exception as e:
-            await self.handle_error(f"{_name(self.send_get_schema_request)} at parse_raw {e!s}")
-            self.get_schema_request_sent = False
-            raise e
-
-        desc = self._compile_descriptor(resp.desc, resp.master_msg_name, resp.file_name)
-        if desc is not None:
-            self.consumer_proto_desc_map[resp.schema_id] = desc
-        else:
-            await self.handle_error(f"{_name(self.send_get_schema_request)}: error compiling schema")
-            self.get_schema_request_sent = False
-            raise Exception("superstream: error compiling schema")
+            await self.handle_error(f"{_name(self.send_client_config_update_req)} at publish {e!s}")
 
     async def register_client(self):
-        kafka_id = self.consume_latest_connection_id()
+        def populate_config_to_send(configs):
+            config_to_send = {}
+            if configs:
+                for key, value in configs.items():
+                    if key.lower() not in (_SUPERSTREAM_CONNECTION_KEY.lower()):
+                        config_to_send[key] = value
+            return config_to_send
 
-        def normalize_to_superstreamconfig(configs):
-            superstream_config = {}
-
-            def map_if_present(config, config_key, superstream_config, superstream_key):
-                if config_key in config:
-                    if config_key == "bootstrap.servers":
-                        value = config[config_key]
-                        if isinstance(value, list):
-                            superstream_config[superstream_key] = ", ".join(value)
-                        else:
-                            superstream_config[superstream_key] = value
-                    else:
-                        superstream_config[superstream_key] = config[config_key]
-
-            map_if_present(configs, "max.request.size", superstream_config, "producer_max_messages_bytes")
-            map_if_present(configs, "acks", superstream_config, "producer_required_acks")
-            map_if_present(configs, "delivery.timeout.ms", superstream_config, "producer_timeout")
-            map_if_present(configs, "retries", superstream_config, "producer_retry_max")
-            map_if_present(configs, "retry.backoff.ms", superstream_config, "producer_retry_backoff")
-            map_if_present(configs, "compression.type", superstream_config, "producer_compression_level")
-
-            map_if_present(configs, "fetch.min.bytes", superstream_config, "consumer_fetch_min")
-            map_if_present(configs, "fetch.max.bytes", superstream_config, "consumer_fetch_default")
-            map_if_present(configs, "retry.backoff.ms", superstream_config, "consumer_retry_backoff")
-            map_if_present(configs, "max.poll.interval.ms", superstream_config, "consumer_max_wait_time")
-            map_if_present(configs, "max.poll.records", superstream_config, "consumer_max_processing_time")
-
-            map_if_present(
-                configs, "auto.commit.interval.ms", superstream_config, "consumer_offset_auto_commit_interval"
-            )
-            map_if_present(configs, "session.timeout.ms", superstream_config, "consumer_group_session_timeout")
-            map_if_present(configs, "heartbeat.interval.ms", superstream_config, "consumer_group_heart_beat_interval")
-            map_if_present(configs, "retry.backoff.ms", superstream_config, "consumer_group_rebalance_retry_back_off")
-
-            map_if_present(configs, "group.id", superstream_config, "consumer_group_id")
-
-            map_if_present(configs, "bootstrap.servers", superstream_config, "servers")
-
-            return superstream_config
-
-        if kafka_id:
-            try:
-                kafka_id = int(kafka_id)
-            except Exception:
+        try:
+            kafka_id = self.consume_latest_connection_id()
+            if kafka_id:
+                try:
+                    kafka_id = int(kafka_id)
+                except Exception:
+                    kafka_id = 0
+            else:
                 kafka_id = 0
-        else:
-            kafka_id = 0
 
-        register_req = RegisterReq(
-            nats_connection_id=self.nats_connection_id,
-            language=_SDK_LANGUAGE,
-            version=_SDK_VERSION,
-            learning_factor=self.learning_factor,
-            config=normalize_to_superstreamconfig(self.configs),
-            reduction_enabled=self.reduction_enabled,
-            connection_id=kafka_id,
-            tags=self.tags,
-        )
+            self.kafka_connection_id = kafka_id
+            local_host = socket.gethostbyname(socket.gethostname())
+            self.client_ip = local_host
+            self.client_host = socket.gethostname()
 
-        try:
-            register_req_bytes = register_req.model_dump_json().encode()
+            register_req = RegisterReq(
+                nats_connection_id=self.nats_connection_id,
+                language=_SDK_LANGUAGE,
+                version=_SDK_VERSION,
+                learning_factor=self.learning_factor,
+                config=populate_config_to_send(self.configs),
+                reduction_enabled=self.reduction_enabled,
+                connection_id=kafka_id,
+                tags=self.tags,
+                client_ip=self.client_ip,
+                client_host=self.client_host,
+            )
+
+            try:
+                register_req_bytes = register_req.model_dump_json().encode()
+                resp = await self._request(SuperstreamSubjects.REGISTER_CLIENT, register_req_bytes, 60 * 5)
+                register_resp = RegisterResp.model_validate_json(resp.data)
+            except Exception as e:
+                raise Exception("superstream: error registering client") from e
+
+            if not register_resp:
+                err = "superstream: registering client: No reply received within the timeout period."
+                self.std.write(err)
+                self.handle_error(err)
+                return
+
+            self.client_hash = register_resp.client_hash
+            self.account_name = register_resp.account_name
+            self.learning_factor = register_resp.learning_factor
+            self.learning_factor_counter = 0
+            self.learning_request_sent = False
+            self.get_schema_request_sent = False
+            self.consumer_proto_desc_map = {}
+
         except Exception as e:
-            raise Exception("superstream: error encoding register requests") from e
-
-        try:
-            resp = await self._request(_CLIENT_REGISTER_SUBJECT, register_req_bytes, 60 * 5)
-            register_resp = RegisterResp.model_validate_json(resp.data)
-        except Exception as e:
-            raise Exception("superstream: error registering client") from e
-
-        self.client_hash = register_resp.client_hash
-        self.account_name = register_resp.account_name
-        self.learning_factor = register_resp.learning_factor
-        self.learning_factor_counter = 0
-        self.learning_request_sent = False
-        self.get_schema_request_sent = False
-        self.consumer_proto_desc_map = {}
-
-    def copy_auth_config(self) -> Dict[str, Any]:
-        relevant_keys = [
-            "security.protocol",
-            "ssl.truststore.location",
-            "ssl.truststore.password",
-            "ssl.keystore.location",
-            "ssl.keystore.password",
-            "ssl.key.password",
-            "ssl.endpoint.identification.algorithm",
-            "sasl.mechanism",
-            "sasl.jaas.config",
-            "sasl.kerberos.service.name",
-            "bootstrap.servers",
-            "client.dns.lookup",
-            "connections.max.idle.ms",
-            "request.timeout.ms",
-            "metadata.max.age.ms",
-            "reconnect.backoff.ms",
-            "reconnect.backoff.max.ms",
-        ]
-
-        relevant_props = {}
-        configs = self.configs
-        for key in relevant_keys:
-            if key in configs:
-                if key == "bootstrap.servers":
-                    value = configs[key]
-                    if isinstance(value, list):
-                        relevant_props[key] = ", ".join(value)
-                    elif isinstance(value, (list, tuple)):
-                        relevant_props[key] = ", ".join(value)
-                    else:
-                        relevant_props[key] = value
-                else:
-                    relevant_props[key] = str(configs[key])
-        return relevant_props
+            self.std.error(f"superstream: {e!s}")
 
     def consume_latest_connection_id(self) -> str:
         retries = 2
         try:
-            config = self.copy_auth_config()
+            config = KafkaUtil.copy_auth_config(self.configs)
             config.update(
                 {
                     "group.id": f"superstream-consumer-group-{uuid.uuid4()}",
@@ -429,7 +424,7 @@ class Superstream:
         except Exception as e:
             raise ErrGenerateConnectionId(e) from e
 
-    async def _initialize_nats_connection(self, token: str, host: Union[str, List[str]]):
+    async def _init_nats_connection(self, token: str, host: Union[str, List[str]]):
         async def on_reconnected():
             local_connection_id = ""
             try:
@@ -441,18 +436,26 @@ class Superstream:
                     .model_dump_json()
                     .encode()
                 )
-                await self._request(_CLIENT_RECONNECTION_UPDATE_SUBJECT, payload)
+                await self._request(SuperstreamSubjects.CLIENT_RECONNECTION_UPDATE, payload)
+                self.subscribe_to_updates()
+                self.superstream_ready = True
+                self.report_clients_update()
             except ErrGenerateConnectionId as e:
                 await self._handle_error(
-                    f"{_name(self._initialize_nats_connection)} at {_name(self._generate_nats_connection_id)}: {e!s}"
+                    f"{_name(self._init_nats_connection)} at {_name(self._generate_nats_connection_id)}: {e!s}"
                 )
                 return
             except Exception as e:
-                await self._handle_error(
-                    f"{_name(self._initialize_nats_connection)} at broker connection request: {e!s}"
-                )
+                await self._handle_error(f"{_name(self._init_nats_connection)} at broker connection request: {e!s}")
                 return
             self.nats_connection_id = local_connection_id
+
+        async def disconnect_cb():
+            self.broker_connection = None
+            self.jetstream = None
+            self.nats_connection_id = ""
+            self.superstream_ready = False
+            self.std.error("superstream: disconnected from superstream")
 
         async def error_cb(e: NatsError):
             """
@@ -479,6 +482,7 @@ class Superstream:
                 servers=host,
                 reconnected_cb=on_reconnected,
                 error_cb=error_cb,
+                disconnected_cb=disconnect_cb,
             )
             self.jetstream = self.broker_connection.jetstream()
             self.nats_connection_id = self._generate_nats_connection_id()
@@ -493,20 +497,21 @@ class Superstream:
                 raise Exception(f"Error connecting with superstream: {exception!s}") from exception
 
     async def wait_for_start(self):
-        subject = _CLIENT_START_SUBJECT % self.client_hash
+        subject = SuperstreamSubjects.START_CLIENT % self.client_hash
 
         async def start_cb(msg):
             try:
                 message_data = json.loads(msg.data)
-                if "start" in message_data:
-                    if message_data["start"]:
+                if SuperstreamValues.START_KEY in message_data:
+                    if message_data[SuperstreamValues.START_KEY]:
                         self.can_start = True
+                        if SuperstreamValues.OPTIMIZED_CONFIGURATION_KEY in message_data:
+                            self.superstream_configs = message_data[SuperstreamValues.OPTIMIZED_CONFIGURATION_KEY]
                     else:
-                        err = message_data.get("error", "")
-                        print(f"superstream: Could not start superstream: {err}")
-                        raise Exception("Thread interrupted due to error in start message")
+                        err = message_data.get(SuperstreamValues.ERROR_KEY, "")
+                        raise Exception(err)
             except Exception as e:
-                print(e)
+                self.std.error(f"superstream: Could not start superstream: {e}")
 
         async def is_started():
             while not self.can_start:
@@ -514,12 +519,13 @@ class Superstream:
 
         subscription = None
         try:
-            await self.broker_connection.subscribe(subject, cb=start_cb)
+            subscription = await self.broker_connection.subscribe(subject, cb=start_cb)
+            # await asyncio.wait_for(is_started(), timeout=SuperstreamValues.MAX_TIME_WAIT_CAN_START)
             await asyncio.wait_for(is_started(), timeout=60)
             if not self.can_start:
-                print("superstream: Could not connect to superstream for 10 minutes.")
+                self.std.error("superstream: Could not connect to superstream for 10 minutes.")
         except Exception as e:
-            print(f"superstream: Could not start superstream: {e}")
+            self.std.error(f"superstream: Could not start superstream: {e}")
             raise e
         finally:
             if subscription is not None:
@@ -544,8 +550,15 @@ class Superstream:
             self.reduction_enabled = reduction_update.enable_reduction
 
         def compression_update_handler(payload: bytes):
+            if EnvVars.is_compression_disabled():
+                self.compression_enabled = False
+                return
+
             compression_update = CompressionUpdate.model_validate_json(payload)
             self.compression_enabled = compression_update.enable_compression
+            self.compression_turned_off_by_superstream = not self.compression_enabled
+            if compression_update.compression_type:
+                self.compression_type = compression_update.compression_type
 
         handlers = {
             LEARNED_SCHEMA: learned_schema_handler,
@@ -562,7 +575,7 @@ class Superstream:
 
     async def subscribe_to_updates(self):
         try:
-            subject = _SUPERSTREAM_UPDATES_SUBJECT % self.client_hash
+            subject = SuperstreamSubjects.UPDATES % self.client_hash
             self.update_manager = SuperstreamUpdateManager(
                 client_hash=self.client_hash,
                 error_handler=self.handle_error,
@@ -584,12 +597,21 @@ class Superstream:
         if partition not in self.topic_partitions[topic]:
             self.topic_partitions[topic].append(partition)
 
+    def set_full_client_configs(self, full_client_configs: Dict[str, Any]):
+        self.full_client_configs = full_client_configs
+        asyncio.create_task(self.execute_send_client_config_update_req_with_wait())
+
     async def init(self):
         try:
-            await self._initialize_nats_connection(self.token, self.host)
+            await self._init_nats_connection(self.token, self.host)
+            if not self.broker_connection:
+                raise Exception("superstream: Could not connect to superstream")
+
             await self.register_client()
             await self.wait_for_start()
             assert self.can_start, "superstream: Could not start superstream"
+
+            self.std.write("Successfully connected to superstream")
 
             await self.subscribe_to_updates()
             self.superstream_ready = True
@@ -598,26 +620,19 @@ class Superstream:
         except Exception as e:
             await self.handle_error(f"superstream: error initializing superstream: {e!s}")
 
-    def init_superstream_props(props: Dict[str, Any], client_type: str) -> Dict[str, Any]:
+    def init_superstream_props(props: Dict[str, Any], client_type: SuperstreamClientType) -> Dict[str, Any]:
         props = props.copy()
         try:
-            superstream_host = os.getenv("SUPERSTREAM_HOST")
-            assert superstream_host, "superstream host is required"
-
-            superstream_token = os.getenv("SUPERSTREAM_TOKEN", _SUPERSTREAM_DEFAULT_TOKEN)
-            learning_factor = os.getenv("SUPERSTREAM_LEARNING_FACTOR", _SUPERSTREAM_DEFAULT_LEARNING_FACTOR)
-            learning_factor = int(learning_factor) if isinstance(learning_factor, str) else learning_factor
-            reduction_enabled = os.getenv("SUPERSTREAM_REDUCTION_ENABLED", "") == "true"
-            tags = os.getenv("SUPERSTREAM_TAGS", "")
+            assert EnvVars.SUPERSTREAM_HOST, "superstream host is required"
 
             superstream = Superstream(
-                token=superstream_token,
-                host=superstream_host,
-                learning_factor=learning_factor,
+                token=EnvVars.SUPERSTREAM_TOKEN,
+                host=EnvVars.SUPERSTREAM_HOST,
+                learning_factor=EnvVars.SUPERSTREAM_LEARNING_FACTOR,
                 configs=props,
-                reduction_enabled=reduction_enabled,
-                client_type=client_type,
-                tags=tags,
+                enable_reduction=EnvVars.SUPERSTREAM_REDUCTION_ENABLED,
+                client_type=client_type.value,
+                tags=EnvVars.SUPERSTREAM_TAGS,
             )
 
             def run_event_loop(loop):
@@ -640,16 +655,72 @@ class Superstream:
 
             props.update(
                 {
-                    _SUPERSTREAM_HOST_KEY: superstream_host,
-                    _SUPERSTREAM_TOKEN_KEY: superstream_token,
-                    _SUPERSTREAM_LEARNING_FACTOR_KEY: learning_factor,
-                    _SUPERSTREAM_REDUCTION_ENABLED_KEY: reduction_enabled,
-                    _SUPERSTREAM_TAGS_KEY: tags,
+                    _SUPERSTREAM_HOST_KEY: EnvVars.SUPERSTREAM_HOST,
+                    _SUPERSTREAM_TOKEN_KEY: EnvVars.SUPERSTREAM_TOKEN,
+                    _SUPERSTREAM_LEARNING_FACTOR_KEY: EnvVars.SUPERSTREAM_LEARNING_FACTOR,
+                    _SUPERSTREAM_REDUCTION_ENABLED_KEY: EnvVars.SUPERSTREAM_REDUCTION_ENABLED,
+                    _SUPERSTREAM_TAGS_KEY: EnvVars.SUPERSTREAM_TAGS,
                     _SUPERSTREAM_CONNECTION_KEY: superstream,
                 }
             )
 
         except Exception as e:
-            sys.stderr.write(f"superstream: error initializing superstream: {e!s}")
+            SuperstreamStd().write(f"superstream: error initializing superstream: {e!s}")
 
         return props
+
+    def init_superstream_config(props: Dict[str, Any], client_type: SuperstreamClientType) -> Dict[str, Any]:
+        props = props.copy()
+        try:
+            assert EnvVars.SUPERSTREAM_HOST, "superstream host is required"
+
+            superstream = Superstream(
+                token=EnvVars.SUPERSTREAM_TOKEN,
+                host=EnvVars.SUPERSTREAM_HOST,
+                learning_factor=EnvVars.SUPERSTREAM_LEARNING_FACTOR,
+                configs=props,
+                enable_reduction=EnvVars.SUPERSTREAM_REDUCTION_ENABLED,
+                client_type=client_type.value,
+                tags=EnvVars.SUPERSTREAM_TAGS,
+                enable_compression=EnvVars.SUPERSTREAM_COMPRESSION_ENABLED,
+            )
+
+            def run_event_loop(loop):
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_forever()
+                except Exception as e:
+                    sys.stderr.write(f"superstream: error running event loop: {e!s}")
+                finally:
+                    loop.close()
+
+            def init_in_background(task):
+                new_loop = asyncio.new_event_loop()
+                t = threading.Thread(target=run_event_loop, args=(new_loop,))
+                t.start()
+                asyncio.run_coroutine_threadsafe(task, new_loop)
+                return new_loop, t
+
+            init_in_background(superstream.init())
+
+            props.update(
+                {
+                    _SUPERSTREAM_HOST_KEY: EnvVars.SUPERSTREAM_HOST,
+                    _SUPERSTREAM_TOKEN_KEY: EnvVars.SUPERSTREAM_TOKEN,
+                    _SUPERSTREAM_LEARNING_FACTOR_KEY: EnvVars.SUPERSTREAM_LEARNING_FACTOR,
+                    _SUPERSTREAM_REDUCTION_ENABLED_KEY: EnvVars.SUPERSTREAM_REDUCTION_ENABLED,
+                    _SUPERSTREAM_TAGS_KEY: EnvVars.SUPERSTREAM_TAGS,
+                    _SUPERSTREAM_CONNECTION_KEY: superstream,
+                }
+            )
+
+        except Exception as e:
+            SuperstreamStd().write(f"superstream: error initializing superstream: {e!s}")
+
+    def close(self):
+        try:
+            self.std.flush()
+            if self.broker_connection:
+                self.broker_connection.close()
+        except Exception:
+            pass

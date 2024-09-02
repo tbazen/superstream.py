@@ -3,14 +3,15 @@ import sys
 import time
 from typing import Any, Dict, List, Optional
 
-from superstream.constants import _CONSUMER_CLIENT_TYPE, _SUPERSTREAM_CONNECTION_KEY
+from superstream.constants import _SUPERSTREAM_CONNECTION_KEY
 from superstream.core import Superstream
+from superstream.types import SuperstreamClientType
 from superstream.utils import proto_to_json
 
 
 class SuperstreamConsumerInterceptor:
     def __init__(self, config: Dict):
-        self._superstream_config_ = Superstream.init_superstream_props(config, _CONSUMER_CLIENT_TYPE)
+        self._superstream_config_ = Superstream.init_superstream_props(config, SuperstreamClientType.CONSUMER)
 
     def __update_topic_partitions(self, message):
         superstream: Superstream = self._superstream_config_.get(_SUPERSTREAM_CONNECTION_KEY)
@@ -56,9 +57,9 @@ class SuperstreamConsumerInterceptor:
                 break
 
         if not schema_id:
-            if superstream.superstream_ready:
-                superstream.client_counters.total_bytes_before_reduction += len(message_value)
-                superstream.client_counters.total_messages_failed_consume += 1
+            # if superstream.superstream_ready:
+            #   superstream.client_counters.total_bytes_before_reduction += len(message_value)
+            #   superstream.client_counters.total_messages_failed_consume += 1
             return message
 
         wait_time = 60
@@ -86,8 +87,8 @@ class SuperstreamConsumerInterceptor:
 
         try:
             deserialized_msg = proto_to_json(message_value, descriptor)
-            superstream.client_counters.total_bytes_before_reduction += len(deserialized_msg)
-            superstream.client_counters.total_messages_successfully_consumed += 1
+            # superstream.client_counters.total_bytes_before_reduction += len(deserialized_msg)
+            # superstream.client_counters.total_messages_successfully_consumed += 1
             message.set_value(deserialized_msg.encode("utf-8"))
             return message
         except Exception as e:

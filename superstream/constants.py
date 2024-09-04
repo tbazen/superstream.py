@@ -1,28 +1,31 @@
 import os
 
-_SUPERSTREAM_INTERNAL_USERNAME = "superstream_internal"
 
-# _SDK_VERSION = "3.5.113"
-_SDK_VERSION = "1.0.11"
-# _SDK_LANGUAGE = "python"
-_SDK_LANGUAGE = "java"
+class SdkInfo:
+    VERSION = "3.5.113"
+    LANGUAGE = "java"
 
-_NATS_INFINITE_RECONNECT_ATTEMPTS = -1
 
-_SUPERSTREAM_LEARNING_FACTOR_KEY = "superstream.learning.factor"
-_SUPERSTREAM_TAGS_KEY = "superstream.tags"
-_SUPERSTREAM_HOST_KEY = "superstream.host"
-_SUPERSTREAM_TOKEN_KEY = "superstream.token"
-_SUPERSTREAM_REDUCTION_ENABLED_KEY = "superstream.reduction.enabled"
-_SUPERSTREAM_CONNECTION_KEY = "superstream.connection"
-_SUPERSTREAM_INNER_CONSUMER_KEY = "superstream.inner.consumer"
-_SUPERSTREAM_METADATA_TOPIC = "superstream.metadata"
+class NatsValues:
+    INFINITE_RECONNECT_ATTEMPTS = -1
+
+
+class SuperstreamKeys:
+    LEARNING_FACTOR = "superstream.learning.factor"
+    TAGS = "superstream.tags"
+    HOST = "superstream.host"
+    TOKEN = "superstream.token"
+    REDUCTION_ENABLED = "superstream.reduction.enabled"
+    CONNECTION = "superstream.connection"
+    INNER_CONSUMER = "superstream.inner.consumer"
+    METADATA_TOPIC = "superstream.metadata"
 
 
 class SuperstreamValues:
     MAX_TIME_WAIT_CAN_START = 60 * 10
     DEFAULT_SUPERSTREAM_TIMEOUT = 3
     OPTIMIZED_CONFIGURATION_KEY = "optimized_configuration"
+    INTERNAL_USERNAME = "superstream_internal"
 
     START_KEY = "start"
     ERROR_KEY = "error"

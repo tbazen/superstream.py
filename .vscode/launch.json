@@ -11,9 +11,9 @@
             "program": "${workspaceFolder}/env/local/aiven_producer.py",
             "console": "integratedTerminal",
             "env": {
-                "SUPERSTREAM_HOST": "localhost:4222",
+                "SUPERSTREAM_HOST": "localhost:6060",
                 "SUPERSTREAM_TOKEN": "no-auth",
-                "SUPERSTREAM_TAGS": "super cool,python",
+                "SUPERSTREAM_TAGS": "supercool,test, v3,python",
                 "SUPERSTREAM_DEBUG": "false",
                 "SUPERSTREAM_RESPONSE_TIMEOUT": "3",
                 "SUPERSTREAM_LEARNING_FACTOR": "20",
@@ -21,34 +21,35 @@
             }
         },
         {
-            "name": "[LOCAL-PRODUCER]",
+            "name": "[PRODUCER]",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/env/local/producer.py",
             "console": "integratedTerminal",
             "env": {
-                "SUPERSTREAM_HOST": "localhost:4222",
-                "SUPERSTREAM_TOKEN": "no-auth",
-                "SUPERSTREAM_COMPRESSION_ENABLED": "false",
-                "SUPERSTREAM_TAGS": "awesome,python",
-                "SUPERSTREAM_DEBUG": "false",
-                "SUPERSTREAM_RESPONSE_TIMEOUT": "3",
-
-                "SUPERSTREAM_LEARNING_FACTOR": "20",
-                "SUPERSTREAM_REDUCTION_ENABLED": "true",
+               "SUPERSTREAM_HOST": "localhost:4223",
+               "SUPERSTREAM_TOKEN": "no-auth",
+               "SUPERSTREAM_TAGS": "supercool,test, v3,python",
+               "SUPERSTREAM_DEBUG": "false",
+               "SUPERSTREAM_RESPONSE_TIMEOUT": "3",
+               "SUPERSTREAM_LEARNING_FACTOR": "20",
+               "SUPERSTREAM_REDUCTION_ENABLED": "true",
             }
         },
         {
-            "name": "[LOCAL-CONSUMER]",
+            "name": "[CONSUMER]",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/env/local/consumer.py",
             "console": "integratedTerminal",
             "env": {
-                "SUPERSTREAM_LEARNING_FACTOR": "20",
-                "SUPERSTREAM_HOST": "localhost:4222",
-                "SUPERSTREAM_REDUCTION_ENABLED": "true",
-                "SUPERSTREAM_TAGS": "awesome,python,consumer"
+               "SUPERSTREAM_HOST": "localhost:4223",
+               "SUPERSTREAM_TOKEN": "no-auth",
+               "SUPERSTREAM_TAGS": "supercool,test, v3,python",
+               "SUPERSTREAM_DEBUG": "false",
+               "SUPERSTREAM_RESPONSE_TIMEOUT": "3",
+               "SUPERSTREAM_LEARNING_FACTOR": "20",
+               "SUPERSTREAM_REDUCTION_ENABLED": "true",
             }
         }
     ]

@@ -4,8 +4,10 @@ import json
 import socket
 import sys
 import threading
+import time
 import uuid
-from typing import Any, Dict, List, Optional, Union
+from datetime import datetime, timedelta
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import nats
 from google.protobuf.descriptor import Descriptor
@@ -13,22 +15,7 @@ from nats.aio.client import Client as NatsClient
 from nats.errors import Error as NatsError
 from nats.js import JetStreamContext
 
-from superstream.constants import (
-    _NATS_INFINITE_RECONNECT_ATTEMPTS,
-    _SDK_LANGUAGE,
-    _SDK_VERSION,
-    _SUPERSTREAM_CONNECTION_KEY,
-    _SUPERSTREAM_HOST_KEY,
-    _SUPERSTREAM_INTERNAL_USERNAME,
-    _SUPERSTREAM_LEARNING_FACTOR_KEY,
-    _SUPERSTREAM_METADATA_TOPIC,
-    _SUPERSTREAM_REDUCTION_ENABLED_KEY,
-    _SUPERSTREAM_TAGS_KEY,
-    _SUPERSTREAM_TOKEN_KEY,
-    EnvVars,
-    SuperstreamSubjects,
-    SuperstreamValues,
-)
+from superstream.constants import EnvVars, NatsValues, SdkInfo, SuperstreamKeys, SuperstreamSubjects, SuperstreamValues
 from superstream.exceptions import ErrGenerateConnectionId
 from superstream.factory import SuperstreamFactory
 from superstream.std import SuperstreamStd
@@ -129,6 +116,7 @@ class Superstream:
         self.client_counters = SuperstreamCounters()
 
         self.client_hash = None
+        self.superstream_configs = {}
 
     async def _request(self, subject: str, payload: bytes, timeout: float = 30, timeout_retries: int = 1):
         """
@@ -155,7 +143,7 @@ class Superstream:
     async def handle_error(self, msg: str):
         if self.broker_connection is None or self.superstream_ready is False:
             return
-        err_msg = f"[sdk: {_SDK_LANGUAGE}][version: {_SDK_VERSION}][tags: {self.tags}] {msg}"
+        err_msg = f"[sdk: {SdkInfo.LANGUAGE}][version: {SdkInfo.VERSION}][tags: {self.tags}] {msg}"
         if self.client_hash is not None and self.client_hash != "":
             err_msg = f"[clientHash: {self.client_hash}] {err_msg}"
         await self._send_client_errors_to_backend(err_msg)
@@ -209,7 +197,31 @@ class Superstream:
         except Exception as e:
             self.std.error(f"superstream: error sending client config update request: {e!s}")
 
-    async def wait_for_superstream_configs(self):
+    def wait_for_superstream_configs_sync(self, config: Dict) -> Dict[str, Any]:
+        config = config.copy() if config else {}
+
+        timeout = EnvVars.SUPERSTREAM_RESPONSE_TIMEOUT or SuperstreamValues.DEFAULT_SUPERSTREAM_TIMEOUT
+        end_time = datetime.now() + timedelta(seconds=timeout)
+
+        try:
+            while not self.superstream_configs:
+                if datetime.now() > end_time:
+                    raise Exception("client configuration was not set within the expected timeout period")
+                time.sleep(1)
+
+            for key, value in self.superstream_configs.items():
+                if self.client_type == SuperstreamClientType.PRODUCER.value:
+                    if KafkaUtil.is_valid_producer_key(key):
+                        config[key] = value
+                elif self.client_type == SuperstreamClientType.CONSUMER.value:
+                    if KafkaUtil.is_valid_consumer_key(key):
+                        config[key] = value
+            return config
+        except Exception as e:
+            self.std.error(f"superstream {e}")
+            return config
+
+    async def wait_for_superstream_configs(self, update_cb: Callable | None = None):
         async def check_superstream_configs():
             while not self.superstream_configs:
                 await asyncio.sleep(1)
@@ -220,6 +232,19 @@ class Superstream:
             await asyncio.wait_for(check_superstream_configs(), timeout=timeout)
             if not self.superstream_configs:
                 raise Exception("client configuration was not set within the expected timeout period")
+
+            if update_cb is None:
+                return
+
+            valid_configs = {}
+            for key, value in self.superstream_configs.items():
+                if self.client_type == SuperstreamClientType.PRODUCER.value:
+                    if KafkaUtil.is_valid_producer_key(key):
+                        valid_configs[key] = value
+                elif self.client_type == SuperstreamClientType.CONSUMER.value:
+                    if KafkaUtil.is_valid_consumer_key(key):
+                        valid_configs[key] = value
+            update_cb(valid_configs)
         except Exception as e:
             self.std.error(f"superstream {e}")
 
@@ -270,7 +295,7 @@ class Superstream:
             if not self.broker_connection or not self.superstream_ready:
                 return
 
-            await update_client_counters()
+            # await update_client_counters()
             await update_client_topic_partitions()
 
         async def start_periodic_task(interval, update_task):
@@ -291,7 +316,7 @@ class Superstream:
         try:
             return compile_descriptor(descriptor, msg_struct_name, file_name)
         except Exception as e:
-            self.handle_error(f"{_name(self._compile_descriptor)} at compile_descriptor {e!s}")
+            self.std.write(f"{_name(self._compile_descriptor)} at compile_descriptor {e!s}")
             raise e
 
     async def send_get_schema_request(self, schema_id: str):
@@ -322,7 +347,7 @@ class Superstream:
             config_to_send = {}
             if configs:
                 for key, value in configs.items():
-                    if key.lower() not in (_SUPERSTREAM_CONNECTION_KEY.lower()):
+                    if key.lower() not in (SuperstreamKeys.CONNECTION.lower()):
                         config_to_send[key] = value
             return config_to_send
 
@@ -343,8 +368,8 @@ class Superstream:
 
             register_req = RegisterReq(
                 nats_connection_id=self.nats_connection_id,
-                language=_SDK_LANGUAGE,
-                version=_SDK_VERSION,
+                language=SdkInfo.LANGUAGE,
+                version=SdkInfo.VERSION,
                 learning_factor=self.learning_factor,
                 config=populate_config_to_send(self.configs),
                 reduction_enabled=self.reduction_enabled,
@@ -388,7 +413,7 @@ class Superstream:
                     "enable.auto.commit": False,
                 }
             )
-            topic = _SUPERSTREAM_METADATA_TOPIC
+            topic = SuperstreamKeys.METADATA_TOPIC
             c = SuperstreamFactory.create_consumer(config)
             partitions = c.list_topics().topics[topic].partitions
             if not partitions:
@@ -410,7 +435,7 @@ class Superstream:
                 return msg.value().decode("utf-8")
 
         except Exception as e:
-            self.handle_error(f"{_name(self.consume_latest_connection_id)}: {e!s}")
+            self.std.write(f"{_name(self.consume_latest_connection_id)}: {e!s}")
             return "0"
         finally:
             if c:
@@ -475,9 +500,9 @@ class Superstream:
 
         try:
             self.broker_connection = await nats.connect(
-                max_reconnect_attempts=_NATS_INFINITE_RECONNECT_ATTEMPTS,
+                max_reconnect_attempts=NatsValues.INFINITE_RECONNECT_ATTEMPTS,
                 reconnect_time_wait=1.0,
-                user=_SUPERSTREAM_INTERNAL_USERNAME,
+                user=SuperstreamValues.INTERNAL_USERNAME,
                 password=token,
                 servers=host,
                 reconnected_cb=on_reconnected,
@@ -655,12 +680,12 @@ class Superstream:
 
             props.update(
                 {
-                    _SUPERSTREAM_HOST_KEY: EnvVars.SUPERSTREAM_HOST,
-                    _SUPERSTREAM_TOKEN_KEY: EnvVars.SUPERSTREAM_TOKEN,
-                    _SUPERSTREAM_LEARNING_FACTOR_KEY: EnvVars.SUPERSTREAM_LEARNING_FACTOR,
-                    _SUPERSTREAM_REDUCTION_ENABLED_KEY: EnvVars.SUPERSTREAM_REDUCTION_ENABLED,
-                    _SUPERSTREAM_TAGS_KEY: EnvVars.SUPERSTREAM_TAGS,
-                    _SUPERSTREAM_CONNECTION_KEY: superstream,
+                    SuperstreamKeys.HOST: EnvVars.SUPERSTREAM_HOST,
+                    SuperstreamKeys.TOKEN: EnvVars.SUPERSTREAM_TOKEN,
+                    SuperstreamKeys.LEARNING_FACTOR: EnvVars.SUPERSTREAM_LEARNING_FACTOR,
+                    SuperstreamKeys.REDUCTION_ENABLED: EnvVars.SUPERSTREAM_REDUCTION_ENABLED,
+                    SuperstreamKeys.TAGS: EnvVars.SUPERSTREAM_TAGS,
+                    SuperstreamKeys.CONNECTION: superstream,
                 }
             )
 
@@ -705,12 +730,12 @@ class Superstream:
 
             props.update(
                 {
-                    _SUPERSTREAM_HOST_KEY: EnvVars.SUPERSTREAM_HOST,
-                    _SUPERSTREAM_TOKEN_KEY: EnvVars.SUPERSTREAM_TOKEN,
-                    _SUPERSTREAM_LEARNING_FACTOR_KEY: EnvVars.SUPERSTREAM_LEARNING_FACTOR,
-                    _SUPERSTREAM_REDUCTION_ENABLED_KEY: EnvVars.SUPERSTREAM_REDUCTION_ENABLED,
-                    _SUPERSTREAM_TAGS_KEY: EnvVars.SUPERSTREAM_TAGS,
-                    _SUPERSTREAM_CONNECTION_KEY: superstream,
+                    SuperstreamKeys.HOST: EnvVars.SUPERSTREAM_HOST,
+                    SuperstreamKeys.TOKEN: EnvVars.SUPERSTREAM_TOKEN,
+                    SuperstreamKeys.LEARNING_FACTOR: EnvVars.SUPERSTREAM_LEARNING_FACTOR,
+                    SuperstreamKeys.REDUCTION_ENABLED: EnvVars.SUPERSTREAM_REDUCTION_ENABLED,
+                    SuperstreamKeys.TAGS: EnvVars.SUPERSTREAM_TAGS,
+                    SuperstreamKeys.CONNECTION: superstream,
                 }
             )
 

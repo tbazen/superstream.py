@@ -3,7 +3,7 @@ import sys
 import time
 from typing import Any, Dict, List, Optional
 
-from superstream.constants import _SUPERSTREAM_CONNECTION_KEY
+from superstream.constants import SuperstreamKeys
 from superstream.core import Superstream
 from superstream.types import SuperstreamClientType
 from superstream.utils import proto_to_json
@@ -13,8 +13,12 @@ class SuperstreamConsumerInterceptor:
     def __init__(self, config: Dict):
         self._superstream_config_ = Superstream.init_superstream_props(config, SuperstreamClientType.CONSUMER)
 
+    @property
+    def superstream(self) -> Superstream:
+        return self._superstream_config_.get(SuperstreamKeys.CONNECTION)
+
     def __update_topic_partitions(self, message):
-        superstream: Superstream = self._superstream_config_.get(_SUPERSTREAM_CONNECTION_KEY)
+        superstream: Superstream = self._superstream_config_.get(SuperstreamKeys.CONNECTION)
         if superstream is None:
             return
         topic = message.topic()
@@ -42,14 +46,14 @@ class SuperstreamConsumerInterceptor:
             return message
 
     async def __deserialize(self, message: Any) -> Any:
-        superstream: Superstream = self._superstream_config_.get(_SUPERSTREAM_CONNECTION_KEY)
+        superstream: Superstream = self._superstream_config_.get(SuperstreamKeys.CONNECTION)
         message_value = message.value()
         headers = message.headers()
 
         if not headers or not message_value:
             return message
 
-        superstream.client_counters.total_bytes_after_reduction += len(message_value)
+        # superstream.client_counters.total_bytes_after_reduction += len(message_value)
         schema_id = None
         for key, value in headers:
             if key == "superstream_schema":
